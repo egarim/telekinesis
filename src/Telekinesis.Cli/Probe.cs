@@ -135,14 +135,22 @@ internal static class Probe
     private static async Task<int> RunSetTextAsync(IAccessibilityBackend backend, string? app, string? find, string text)
     {
         // Prefer an explicitly named target; otherwise take the first editable element.
-        var query = new ElementQuery
+        // Editors surface as Edit or Document depending on the toolkit (Windows 11 Notepad
+        // is a Document), so try each role until something matches.
+        IReadOnlyList<AccessibleElement> matches = [];
+        foreach (var role in string.IsNullOrEmpty(find)
+                     ? new AccessibleRole?[] { AccessibleRole.Edit, AccessibleRole.Document, AccessibleRole.Text }
+                     : new AccessibleRole?[] { null })
         {
-            ApplicationId = app,
-            NameContains = string.IsNullOrEmpty(find) ? null : find,
-            Role = string.IsNullOrEmpty(find) ? AccessibleRole.Edit : null,
-            MaxResults = 5,
-        };
-        var matches = await backend.FindElementsAsync(query);
+            matches = await backend.FindElementsAsync(new ElementQuery
+            {
+                ApplicationId = app,
+                NameContains = string.IsNullOrEmpty(find) ? null : find,
+                Role = role,
+                MaxResults = 5,
+            });
+            if (matches.Count > 0) break;
+        }
         var editable = matches.Where(m =>
             m.Role is AccessibleRole.Text or AccessibleRole.Edit or AccessibleRole.Document).ToList();
         // When no explicit target was named, prefer an empty field so we never clobber a
