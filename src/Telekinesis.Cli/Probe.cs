@@ -29,6 +29,10 @@ internal static class Probe
         var type = Opt("--type");
         var keys = Opt("--keys");
         var setText = Opt("--set-text");
+        var screenshot = Opt("--screenshot");
+        var parse = args.Contains("--parse");
+        var clickAt = Opt("--click-at");
+        var region = Opt("--region");
         var depth = int.TryParse(Opt("--depth"), out var d) ? d : 2;
         var actionsEnabled = args.Contains("--enable-actions");
 
@@ -49,6 +53,19 @@ internal static class Probe
 
         try
         {
+            if (screenshot is not null)
+                return await RunScreenshotAsync(backend, screenshot, region);
+            if (parse)
+                return await RunParseAsync(backend, region);
+            if (clickAt is not null)
+            {
+                if (!actionsEnabled)
+                {
+                    Console.Error.WriteLine("Refusing to act without --enable-actions (read-only by default).");
+                    return 2;
+                }
+                return await RunClickAtAsync(backend, clickAt);
+            }
             if (setText is not null)
             {
                 if (!actionsEnabled)
@@ -178,6 +195,65 @@ internal static class Probe
         var rk = await backend.PressKeysAsync(keys!);
         Console.WriteLine($"  → success={rk.Success} path={rk.Path} {rk.Error}");
         return rk.Success ? 0 : 1;
+    }
+
+    // ---- Vision tier ----
+
+    private static async Task<int> RunScreenshotAsync(IAccessibilityBackend backend, string file, string? region)
+    {
+        if (backend is not IScreenCaptureBackend capture)
+        {
+            Console.Error.WriteLine($"{backend.Name} does not support screen capture yet.");
+            return 1;
+        }
+        var image = await capture.CaptureScreenAsync(PerceptionTools.ParseRegion(region));
+        await File.WriteAllBytesAsync(file, image.PngData);
+        Console.WriteLine($"Captured {image.Width}x{image.Height} → {file} ({image.PngData.Length / 1024} KiB)");
+        return 0;
+    }
+
+    private static async Task<int> RunParseAsync(IAccessibilityBackend backend, string? region)
+    {
+        if (backend is not IScreenCaptureBackend capture)
+        {
+            Console.Error.WriteLine($"{backend.Name} does not support screen capture yet.");
+            return 1;
+        }
+        using var parser = new Telekinesis.Vision.OmniParserClient();
+        if (!await parser.ProbeAsync())
+        {
+            Console.Error.WriteLine($"No OmniParser server at {parser.BaseUrl} (see docs/VISION.md, "
+                + $"or set {Telekinesis.Vision.OmniParserClient.UrlEnvVar}).");
+            return 1;
+        }
+        var r = PerceptionTools.ParseRegion(region);
+        var image = await capture.CaptureScreenAsync(r);
+        Console.WriteLine($"Parsing {image.Width}x{image.Height} via {parser.BaseUrl} ...");
+        var elements = await parser.ParseAsync(image, r is null ? null : (r.X, r.Y));
+        Console.WriteLine($"{elements.Count} element(s):");
+        foreach (var e in elements)
+            Console.WriteLine($"  [{e.Type}]{(e.Interactive ? "*" : " ")} {Quote(e.Content)}  @{e.Bounds.X},{e.Bounds.Y} {e.Bounds.Width}x{e.Bounds.Height}");
+        Console.WriteLine("(* = interactive; click with:  telekinesis probe --enable-actions --click-at \"x,y\")");
+        return 0;
+    }
+
+    private static async Task<int> RunClickAtAsync(IAccessibilityBackend backend, string point)
+    {
+        if (backend is not IPointerInjectionBackend pointer)
+        {
+            Console.Error.WriteLine($"{backend.Name} does not support coordinate clicks yet.");
+            return 1;
+        }
+        var parts = point.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || !int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var y))
+        {
+            Console.Error.WriteLine($"Malformed point '{point}' (expected 'x,y').");
+            return 1;
+        }
+        Console.WriteLine($"Clicking at ({x},{y}) ...");
+        var r = await pointer.ClickAtAsync(x, y);
+        Console.WriteLine($"  → success={r.Success} path={r.Path} {r.Error}");
+        return r.Success ? 0 : 1;
     }
 
     private static void PrintTree(AccessibleElement e, int indent)

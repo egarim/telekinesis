@@ -58,7 +58,25 @@ elevated apps. `doctor` reports the current state as the `elevation` check.
 - Password fields: `IsPassword` → role `PasswordEdit` + `Protected` state, text never
   read (verified: `Text` stays null on a `UseSystemPasswordChar` box with content).
 
-## 6. Perception caps
+## 6. Multi-monitor + mixed DPI: UIA bounds can lie off the primary monitor
+Validated on a 3-monitor system with different scale factors (primary at 150 %):
+screenshot pixels, OmniParser output, and `click_at`/`SendInput` all share one
+coordinate space and stay consistent with each other — but **UIA element bounds on
+secondary monitors came back offset from the true pixels**, even with per-monitor-v2
+awareness set. Windows also relabels controls' physical size per monitor (a 140x23
+logical button reports 210x35 at 150 %).
+
+Consequences:
+- On single-monitor systems and on the primary monitor, a11y bounds and pixels agree
+  — clicks on a11y centers land correctly (all section-5 validation ran there).
+- On secondary monitors, don't click a11y-reported centers blindly. Escalate to the
+  vision tier: `screenshot` the region, confirm the target pixels, `click_at` what
+  you see (see `docs/VISION.md`).
+- Z-order is invisible to the a11y tree: an element reports `Visible` with plausible
+  bounds while another window covers it, and the click goes to whatever is on top.
+  A pixel check is the only reliable guard.
+
+## 7. Perception caps
 The control-view walk caps children at 256 per node and searches at 20 000 nodes, so
 browsers and virtualized grids can't hang a call. UIA additionally only materializes
 virtualized list items that have been realized on screen — expect partial trees for
