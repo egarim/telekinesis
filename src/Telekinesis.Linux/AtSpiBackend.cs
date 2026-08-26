@@ -94,9 +94,74 @@ public sealed class AtSpiBackend : IAccessibilityBackend
         return await ReadNodeAsync(applicationId, RootPath, maxDepth, ct);
     }
 
-    public Task<IReadOnlyList<AccessibleElement>> FindElementsAsync(ElementQuery query, CancellationToken ct = default)
-        => throw new NotImplementedException(
-            "TODO: breadth-first walk with role/name filters; bounded by query.MaxResults.");
+    public async Task<IReadOnlyList<AccessibleElement>> FindElementsAsync(ElementQuery query, CancellationToken ct = default)
+    {
+        // Breadth-first over the accessible tree, bounded by MaxResults and a node
+        // cap so a runaway tree can never hang the call. Matched nodes are returned
+        // flat (no children populated) — callers drill down with get_tree/read_element.
+        const int NodeCap = 20_000;
+        var results = new List<AccessibleElement>();
+        var visitedNodes = 0;
+
+        // Seed with the requested app, or every application on the bus.
+        var queue = new Queue<(string Service, string Path)>();
+        if (!string.IsNullOrEmpty(query.ApplicationId))
+            queue.Enqueue((query.ApplicationId, RootPath));
+        else
+            foreach (var app in await ListApplicationsAsync(ct))
+                queue.Enqueue((app.Id, RootPath));
+
+        while (queue.Count > 0 && results.Count < query.MaxResults && visitedNodes < NodeCap)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (service, path) = queue.Dequeue();
+            visitedNodes++;
+
+            var roleName = await GetRoleNameAsync(service, path);
+            var role = AtSpiRoleMap.Normalize(roleName);
+            var name = await GetAccessiblePropertyStringAsync(service, path, "Name");
+
+            if (Matches(query, role, name))
+            {
+                var states = await GetStateAsync(service, path);
+                if (role == AccessibleRole.PasswordEdit) states |= ElementState.Protected;
+                if (query.WithStates is { } required && (states & required) != required)
+                {
+                    // filtered out by state; still descend into children below
+                }
+                else
+                {
+                    results.Add(new AccessibleElement
+                    {
+                        Ref = EncodeRef(service, path),
+                        Role = role,
+                        NativeRole = roleName,
+                        Name = string.IsNullOrEmpty(name) ? null : name,
+                        States = states,
+                        Bounds = await GetExtentsAsync(service, path),
+                        ChildCount = 0,
+                    });
+                }
+            }
+
+            foreach (var child in await GetChildrenAsync(service, path))
+                queue.Enqueue(child);
+        }
+
+        return results;
+    }
+
+    private static bool Matches(ElementQuery query, AccessibleRole role, string? name)
+    {
+        if (query.Role is { } r && role != r) return false;
+        if (!string.IsNullOrEmpty(query.NameContains) &&
+            (name is null || name.IndexOf(query.NameContains, StringComparison.OrdinalIgnoreCase) < 0))
+            return false;
+        // With no role and no name filter, only return named elements to avoid flooding.
+        if (query.Role is null && string.IsNullOrEmpty(query.NameContains))
+            return !string.IsNullOrEmpty(name);
+        return true;
+    }
 
     public async Task<AccessibleElement> ReadElementAsync(ElementRef element, CancellationToken ct = default)
     {
@@ -227,12 +292,100 @@ public sealed class AtSpiBackend : IAccessibilityBackend
             static (Message m, object? _) => m.GetBodyReader().ReadString(), null);
     }
 
+    private const string ComponentIface = "org.a11y.atspi.Component";
+    private const string TextIface = "org.a11y.atspi.Text";
+
+    /// <summary>org.a11y.atspi.Accessible.GetState → au (two uint32 state words).</summary>
+    private async Task<ElementState> GetStateAsync(string service, string path)
+    {
+        MessageBuffer CreateMessage()
+        {
+            using var writer = Bus.GetMessageWriter();
+            writer.WriteMethodCallHeader(destination: service, path: path,
+                @interface: AccessibleIface, member: "GetState");
+            return writer.CreateMessage();
+        }
+        try
+        {
+            var words = await Bus.CallMethodAsync(CreateMessage(),
+                static (Message m, object? _) => m.GetBodyReader().ReadArrayOfUInt32(), null);
+            return AtSpiStateMap.Map(words);
+        }
+        catch (DBusExceptionBase)
+        {
+            return ElementState.None;
+        }
+    }
+
+    /// <summary>org.a11y.atspi.Component.GetExtents(u coordType) → (iiii). coordType 0 = screen.</summary>
+    private async Task<Bounds?> GetExtentsAsync(string service, string path)
+    {
+        MessageBuffer CreateMessage()
+        {
+            using var writer = Bus.GetMessageWriter();
+            writer.WriteMethodCallHeader(destination: service, path: path,
+                @interface: ComponentIface, member: "GetExtents", signature: "u");
+            writer.WriteUInt32(0u); // ATSPI_COORD_TYPE_SCREEN
+            return writer.CreateMessage();
+        }
+        try
+        {
+            return await Bus.CallMethodAsync(CreateMessage(),
+                static (Message m, object? _) =>
+                {
+                    var reader = m.GetBodyReader();
+                    reader.AlignStruct();
+                    int x = reader.ReadInt32(), y = reader.ReadInt32();
+                    int w = reader.ReadInt32(), h = reader.ReadInt32();
+                    return (Bounds?)new Bounds(x, y, w, h);
+                }, null);
+        }
+        catch (DBusExceptionBase)
+        {
+            return null; // element has no Component interface
+        }
+    }
+
+    /// <summary>org.a11y.atspi.Text.GetText(start, end) → s. Never called for protected fields.</summary>
+    private async Task<string?> GetTextAsync(string service, string path)
+    {
+        MessageBuffer CreateMessage()
+        {
+            using var writer = Bus.GetMessageWriter();
+            writer.WriteMethodCallHeader(destination: service, path: path,
+                @interface: TextIface, member: "GetText", signature: "ii");
+            writer.WriteInt32(0);
+            writer.WriteInt32(-1); // -1 = to the end
+            return writer.CreateMessage();
+        }
+        try
+        {
+            var text = await Bus.CallMethodAsync(CreateMessage(),
+                static (Message m, object? _) => m.GetBodyReader().ReadString(), null);
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+        catch (DBusExceptionBase)
+        {
+            return null; // element has no Text interface
+        }
+    }
+
     private async Task<AccessibleElement> ReadNodeAsync(string service, string path, int maxDepth, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var name = await GetAccessiblePropertyStringAsync(service, path, "Name");
         var roleName = await GetRoleNameAsync(service, path);
+        var role = AtSpiRoleMap.Normalize(roleName);
+        var states = await GetStateAsync(service, path);
+        var bounds = await GetExtentsAsync(service, path);
         var children = await GetChildrenAsync(service, path);
+
+        // Password fields are always marked Protected and never have their text read.
+        var isProtected = role == AccessibleRole.PasswordEdit;
+        if (isProtected) states |= ElementState.Protected;
+        string? text = null;
+        if (!isProtected && role is AccessibleRole.Text or AccessibleRole.Edit or AccessibleRole.Label or AccessibleRole.Document)
+            text = await GetTextAsync(service, path);
 
         List<AccessibleElement>? childNodes = null;
         if (maxDepth > 0 && children.Count > 0)
@@ -242,16 +395,15 @@ public sealed class AtSpiBackend : IAccessibilityBackend
                 childNodes.Add(await ReadNodeAsync(childSvc, childPath, maxDepth - 1, ct));
         }
 
-        var role = AtSpiRoleMap.Normalize(roleName);
         return new AccessibleElement
         {
             Ref = EncodeRef(service, path),
             Role = role,
             NativeRole = roleName,
             Name = string.IsNullOrEmpty(name) ? null : name,
-            // Protected content (password fields) is never read.
-            Text = role == AccessibleRole.PasswordEdit ? null : null, // TODO: org.a11y.atspi.Text
-            States = role == AccessibleRole.PasswordEdit ? ElementState.Protected : ElementState.None, // TODO: GetState
+            States = states,
+            Bounds = bounds,
+            Text = text,
             ChildCount = children.Count,
             Children = childNodes,
         };
