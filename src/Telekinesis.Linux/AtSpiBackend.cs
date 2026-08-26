@@ -66,12 +66,28 @@ public sealed class AtSpiBackend : IAccessibilityBackend
             if (_a11yConnection is null) await ConnectAsync(ct);
             var apps = await ListApplicationsAsync(ct);
             items.Add(new("a11y-bus", true, $"Accessibility bus reachable; {apps.Count} application(s) registered."));
+
+            // Even with the bus up, toolkits (GTK/Qt) only register their trees when
+            // accessibility is *enabled*. If it's off, apps are invisible — the most
+            // common "0 applications" cause.
+            var enabled = await GetA11yEnabledAsync();
+            items.Add(new("a11y-enabled", enabled != false,
+                enabled switch
+                {
+                    true => "Accessibility is enabled; toolkits will expose their trees.",
+                    false => "Accessibility is DISABLED — GTK/Qt apps will not register (you'll see 0 applications).",
+                    null => "Could not read org.a11y.Status.IsEnabled (assuming enabled).",
+                },
+                enabled == false
+                    ? "Enable it: gsettings set org.gnome.desktop.interface toolkit-accessibility true "
+                      + "(Electron/Chromium also need --force-renderer-accessibility)."
+                    : null));
         }
         catch (Exception ex)
         {
             items.Add(new("a11y-bus", false, $"Cannot reach the accessibility bus: {ex.Message}",
-                "Enable it: gsettings set org.gnome.desktop.interface toolkit-accessibility true " +
-                "(and note Electron/Chromium apps need --force-renderer-accessibility to appear)."));
+                "Enable it: gsettings set org.gnome.desktop.interface toolkit-accessibility true "
+                + "(and note Electron/Chromium apps need --force-renderer-accessibility to appear)."));
         }
 
         var uinputOk = File.Exists("/dev/uinput") && CanOpenUinput();
@@ -523,6 +539,31 @@ public sealed class AtSpiBackend : IAccessibilityBackend
     private DBusConnection Bus => _a11yConnection
         ?? throw new InvalidOperationException("Not connected; call ConnectAsync first.");
 
+    /// <summary>Reads org.a11y.Status.IsEnabled from the session bus. Null if unreadable.</summary>
+    private static async Task<bool?> GetA11yEnabledAsync()
+    {
+        try
+        {
+            using var session = new DBusConnection(DBusAddress.Session!);
+            await session.ConnectAsync();
+            MessageBuffer CreateMessage()
+            {
+                using var writer = session.GetMessageWriter();
+                writer.WriteMethodCallHeader(destination: "org.a11y.Bus", path: "/org/a11y/bus",
+                    @interface: "org.freedesktop.DBus.Properties", member: "Get", signature: "ss");
+                writer.WriteString("org.a11y.Status");
+                writer.WriteString("IsEnabled");
+                return writer.CreateMessage();
+            }
+            return await session.CallMethodAsync(CreateMessage(),
+                static (Message m, object? _) => (bool?)m.GetBodyReader().ReadVariantValue().GetBool(), null);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static async Task<string> GetA11yBusAddressAsync(DBusConnection session)
     {
         // MessageWriter is a ref struct: build the buffer before any await.
@@ -644,6 +685,12 @@ public sealed class AtSpiBackend : IAccessibilityBackend
                     reader.AlignStruct();
                     int x = reader.ReadInt32(), y = reader.ReadInt32();
                     int w = reader.ReadInt32(), h = reader.ReadInt32();
+                    // AT-SPI returns sentinel/garbage extents for widgets that are not
+                    // laid out (e.g. off-screen notebook pages): huge or negative sizes.
+                    // Treat those as "no usable bounds" so agents never click a bad target.
+                    const int Max = 100_000;
+                    if (w <= 0 || h <= 0 || w > Max || h > Max || Math.Abs(x) > Max || Math.Abs(y) > Max)
+                        return (Bounds?)null;
                     return (Bounds?)new Bounds(x, y, w, h);
                 }, null);
         }
