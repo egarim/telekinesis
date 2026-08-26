@@ -26,8 +26,7 @@ public sealed class BackendProvider : IAsyncDisposable
                 "This build does not include the Windows backend; build/run the net10.0-windows target.");
 #endif
         if (OperatingSystem.IsMacOS())
-            throw new PlatformNotSupportedException(
-                "The macOS (AXAPI) backend is not implemented yet.");
+            return new Telekinesis.MacOS.AxBackend();
         throw new PlatformNotSupportedException("Unsupported operating system.");
     }
 
