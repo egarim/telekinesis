@@ -66,11 +66,13 @@ the live Lun.Os XFCE container):
 Apps the session starts at boot (thunar, xfce4-panel, xfce4-terminal, xfdesktop) are on
 the a11y bus and fully drivable. But apps launched *afterward* (mousepad, xfce4-appfinder)
 do **not** register — they never load the atk-bridge, so their trees never reach the
-registry, even with `IsEnabled=true`. `libatk-bridge-2.0` is present, but the GTK module
-wiring is missing for ad-hoc launches. Fix belongs in the Lun.Os session config: set the
-XSETTINGS `Gtk/Modules` to include `atk-bridge` (via xfconf `xsettings` channel), or export
-`GTK_MODULES=atk-bridge` in the session environment, so any launched GTK app exposes a11y.
-Until then, target the already-registered session apps for demos.
+registry, even with `IsEnabled=true`. `libatk-bridge-2.0` is present, but no atk-bridge GTK module is in
+`gtk-3.0/modules/`, and `GTK_MODULES=atk-bridge` alone does **not** fix it (tested) —
+so the gap is deeper than a single env var. The reliable signal is that only apps the
+session manager starts at boot register; ad-hoc launches don't. Fix belongs in the Lun.Os
+image/session config (start demo apps through the session, and/or add the atk-bridge GTK
+module + `Gtk/Modules` xsetting). Until then, target the already-registered session apps —
+Thunar's location entry is a working editable `Text` field for `set_text` demos.
 
 ## Containers (the Lun.Os webtop/XFCE case)
 - The a11y bus GUID from `org.a11y.Bus.GetAddress` may be stale when the bus was
