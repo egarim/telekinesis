@@ -8,6 +8,17 @@ tool sequence it exercises, and the build work it depends on.
 Recording target: 30–60s per clip, terminal/chat on the left, the live desktop on the
 right. Narration comes from the scenario runner's `say` lines (overlaid as captions).
 
+## Production pipeline — record on the VM, polish with flick
+The finished reel is produced with the **flick** skill (`/flick`), which turns a
+transcript into original short-form scene animations (Remotion). Pipeline per demo:
+1. Run the scenario on the VM and screen-record the real Telekinesis session (proof it's real).
+2. The scenario's `say` lines double as the **flick transcript** — one narration beat per scene.
+3. Feed the recording (or the transcript) to `/flick`: it plans one animation per scene,
+   builds them with action-matched sound effects (typing, click, reveal), and renders the reel.
+Keep the raw screen capture in the cut as the "receipts" moment; flick wraps it with the
+hook, captions, and motion. Author `say` lines as spoken narration, not tool logs, so they
+transcribe cleanly.
+
 ---
 
 ## 1. "Fill this out for me" — agent operates a real GUI app
