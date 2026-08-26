@@ -46,6 +46,23 @@ internal static class Probe
 
         Console.WriteLine($"Connected via {backend.Name}.\n");
 
+        try
+        {
+            return await DispatchAsync(backend, app, find, click, type, keys, depth, actionsEnabled);
+        }
+        catch (Exception ex)
+        {
+            // Full diagnostics: on the first VM run, a marshalling bug should report
+            // the exact failing call and stack, not just a one-line message.
+            Console.Error.WriteLine("\n--- probe failed ---");
+            Console.Error.WriteLine(ex.ToString());
+            return 1;
+        }
+    }
+
+    private static async Task<int> DispatchAsync(IAccessibilityBackend backend, string? app, string? find,
+        string? click, string? type, string? keys, int depth, bool actionsEnabled)
+    {
         // Action tests first (they need a target); otherwise fall through to inspection.
         if (click is not null || type is not null || keys is not null)
         {
