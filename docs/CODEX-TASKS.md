@@ -63,7 +63,26 @@ Runner prints each `say` line (for caption overlay), executes the tool against t
 backend, supports `{{bind.path}}` substitution from prior results, and stops on first
 failure with a nonzero exit.
 
+## Validated ground truth (from live Lun.Os container testing — build the runner to fit this)
+The Linux backend is proven end-to-end against the real Lun.Os XFCE desktop. Design the
+runner around these facts (see docs/RUNNING-ON-LINUX.md):
+- **Native actions are the primary path and they work with no `/dev/uinput`.** `invoke`
+  and `set_text` use AT-SPI `DoAction`/`EditableText` and return `path=NativeAction`.
+  The runner should prefer these; treat injection (`click`-by-coord, `type_text`,
+  `press_keys`) as the fallback that requires uinput passthrough.
+- **Target already-registered apps.** In the webtop/XFCE container, freshly launched GTK3
+  apps (e.g. mousepad) may not register (missing atk-bridge in the image); the running
+  session apps (thunar `:1.5`, xfce4-panel `:1.4`, xfce4-terminal `:1.15`) do. `demos/thunar-navigate.json`
+  is a VALIDATED flow — use it as the runner's first end-to-end test.
+- **Multiple windows exist** per app id; `find_elements` may return several matches. The
+  runner's `bind` should keep the first match and let steps disambiguate by name.
+- **Verify by read-back**, not by assuming success: the thunar scenario confirms the
+  navigation by re-reading the window title and asserting it changed. Support an
+  `assert`/`expect` step field (see the scenario) so demos self-verify on camera.
+- Element ids look like `:1.5|/org/gtk/WidgetFactory4/a11y/<uuid>` — treat opaque.
+
 ## Acceptance
 - `dotnet build` green; `telekinesis doctor` unchanged.
+- `telekinesis run demos/thunar-navigate.json` drives Thunar and self-verifies.
 - Demos 3, 4, 5 have their enabling tool/flag and a `demos/*.json` scenario each.
 - No secret ever reaches the model or the audit log.

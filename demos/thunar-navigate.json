@@ -1,0 +1,28 @@
+{
+  "name": "thunar-navigate",
+  "narration": "An agent navigates a real file manager on the Lun.Os desktop — by button name, through the accessibility tree, no pixels.",
+  "notes": "VALIDATED end-to-end on the live Lun.Os XFCE container (2026-08-26). Uses native AT-SPI actions only (path=NativeAction) — needs no /dev/uinput. Target app is Thunar, already registered on the session's a11y bus.",
+  "steps": [
+    { "say": "Reading the file manager's current location",
+      "tool": "find_elements",
+      "args": { "role": "Window", "applicationId": "" },
+      "bind": "win",
+      "expect": "window title shows the starting folder" },
+
+    { "say": "Clicking 'Open Parent' — via the native accessibility action",
+      "tool": "invoke",
+      "pre": [ { "tool": "find_elements", "args": { "role": "Button", "nameContains": "Open Parent" }, "bind": "parentBtn" } ],
+      "args": { "elementId": "{{parentBtn.Ref.Id}}", "applicationId": "{{parentBtn.Ref.ApplicationId}}" } },
+
+    { "say": "Verifying the navigation happened by re-reading the title",
+      "tool": "read_element",
+      "args": { "elementId": "{{win.Ref.Id}}", "applicationId": "{{win.Ref.ApplicationId}}" },
+      "bind": "winAfter",
+      "assert": "winAfter.Name != win.Name" },
+
+    { "say": "Returning home",
+      "tool": "invoke",
+      "pre": [ { "tool": "find_elements", "args": { "role": "Button", "nameContains": "Home" }, "bind": "homeBtn" } ],
+      "args": { "elementId": "{{homeBtn.Ref.Id}}", "applicationId": "{{homeBtn.Ref.ApplicationId}}" } }
+  ]
+}
