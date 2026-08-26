@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Telekinesis.Abstractions\Telekinesis.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Managed UIA client (UIAutomationClient/UIAutomationTypes) ships with the desktop runtime. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Lets `dotnet build` compile this project on Linux/macOS CI machines too. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+</Project>

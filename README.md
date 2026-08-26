@@ -30,7 +30,7 @@ MCP client config:
 | OS | Perception | Actions | Status |
 |---|---|---|---|
 | Linux | AT-SPI over D-Bus (Tmds.DBus.Protocol) — list, tree, find, states, bounds, text | AT-SPI Action/EditableText/Value → uinput fallback | perception + actions done; focus/events next |
-| Windows | UI Automation | UIA patterns → SendInput | planned |
+| Windows | UI Automation (managed UIA client) — list, tree, find, states, bounds, text | UIA Invoke/Value/Toggle/RangeValue → SendInput fallback | perception + actions + events validated live ([notes](docs/RUNNING-ON-WINDOWS.md)) |
 | macOS | AXAPI | AXPress → CGEvent | planned |
 
 > Actions are implemented against the spec but await runtime testing on a Linux
