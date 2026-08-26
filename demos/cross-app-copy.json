@@ -1,0 +1,32 @@
+{
+  "name": "cross-app-copy",
+  "narration": "Read a value out of one app, switch windows, and enter it in another.",
+  "steps": [
+    { "say": "Reading the total from the source app",
+      "tool": "find_elements",
+      "args": { "role": "Text", "nameContains": "Total", "applicationId": "" },
+      "bind": "total" },
+
+    { "say": "Captured the total: {{total.Text}}",
+      "tool": "read_element",
+      "args": { "elementId": "{{total.Ref.Id}}", "applicationId": "{{total.Ref.ApplicationId}}" },
+      "bind": "totalDetail" },
+
+    { "say": "Switching to the invoice window",
+      "tool": "press_keys",
+      "args": { "combination": "alt+tab" } },
+
+    { "say": "Confirming the window switch landed",
+      "tool": "wait_for",
+      "args": { "kind": "focus-changed", "timeoutMs": 2000 } },
+
+    { "say": "Locating the Amount field in the invoice",
+      "tool": "find_elements",
+      "args": { "role": "Edit", "nameContains": "Amount" },
+      "bind": "amount" },
+
+    { "say": "Entering the copied total",
+      "tool": "set_text",
+      "args": { "elementId": "{{amount.Ref.Id}}", "applicationId": "{{amount.Ref.ApplicationId}}", "text": "{{totalDetail.Text}}" } }
+  ]
+}
