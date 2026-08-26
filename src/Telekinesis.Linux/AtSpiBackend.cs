@@ -706,8 +706,10 @@ public sealed class AtSpiBackend : IAccessibilityBackend
                     // AT-SPI returns sentinel/garbage extents for widgets that are not
                     // laid out (e.g. off-screen notebook pages): huge or negative sizes.
                     // Treat those as "no usable bounds" so agents never click a bad target.
+                    // Compare without Math.Abs: Math.Abs(int.MinValue) throws, and some
+                    // toolkits use int.MinValue as an "unplaced" sentinel coordinate.
                     const int Max = 100_000;
-                    if (w <= 0 || h <= 0 || w > Max || h > Max || Math.Abs(x) > Max || Math.Abs(y) > Max)
+                    if (w <= 0 || h <= 0 || w > Max || h > Max || x < -Max || x > Max || y < -Max || y > Max)
                         return (Bounds?)null;
                     return (Bounds?)new Bounds(x, y, w, h);
                 }, null);
