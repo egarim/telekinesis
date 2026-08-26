@@ -139,12 +139,18 @@ internal static class Probe
         {
             ApplicationId = app,
             NameContains = string.IsNullOrEmpty(find) ? null : find,
-            Role = string.IsNullOrEmpty(find) ? AccessibleRole.Text : null,
+            Role = string.IsNullOrEmpty(find) ? AccessibleRole.Edit : null,
             MaxResults = 5,
         };
         var matches = await backend.FindElementsAsync(query);
-        var target = matches.FirstOrDefault(m =>
-            m.Role is AccessibleRole.Text or AccessibleRole.Edit or AccessibleRole.Document) ?? matches.FirstOrDefault();
+        var editable = matches.Where(m =>
+            m.Role is AccessibleRole.Text or AccessibleRole.Edit or AccessibleRole.Document).ToList();
+        // When no explicit target was named, prefer an empty field so we never clobber a
+        // document that already has content.
+        var target = (string.IsNullOrEmpty(find)
+                ? editable.FirstOrDefault(m => string.IsNullOrEmpty(m.Text))
+                : null)
+            ?? editable.FirstOrDefault() ?? matches.FirstOrDefault();
         if (target is null)
         {
             Console.Error.WriteLine("No editable element found to fill.");
