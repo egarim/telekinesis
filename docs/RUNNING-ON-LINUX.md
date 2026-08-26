@@ -52,11 +52,25 @@ dbus-run-session -- bash -c 'gtk4-widget-factory & sleep 6; telekinesis probe'
 ```
 
 ## What's proven working
-Connection + a11y-bus discovery, `list_applications`, tree walk (roles/names/bounds),
-`find_elements` with state filters, AT-SPI state (`au`) and extents (`(iiii)`) parsing,
-and uinput injection (`press_keys`). Validated against `gtk4-widget-factory` on the host,
-**and against a live Lun.Os XFCE container desktop** (10 real apps, full panel tree,
-native button click).
+Every core capability is validated against real apps (host `gtk4-widget-factory` +
+the live Lun.Os XFCE container):
+- Connection + a11y-bus discovery (guid-tolerant), `list_applications`
+- Tree walk (roles/names/bounds), `find_elements` with state filters
+- AT-SPI state (`au`) and extents (`(iiii)`) parsing
+- Events: focus tracking / `wait_for`
+- Native `invoke` — clicked a real Thunar toolbar button (`path=NativeAction`)
+- Native `set_text` — set Thunar's location entry and verified by read-back (`path=NativeAction`)
+- uinput injection — `press_keys` (host; needs `/dev/uinput`)
+
+## New GTK apps don't register in the webtop image (Lun.Os image TODO)
+Apps the session starts at boot (thunar, xfce4-panel, xfce4-terminal, xfdesktop) are on
+the a11y bus and fully drivable. But apps launched *afterward* (mousepad, xfce4-appfinder)
+do **not** register — they never load the atk-bridge, so their trees never reach the
+registry, even with `IsEnabled=true`. `libatk-bridge-2.0` is present, but the GTK module
+wiring is missing for ad-hoc launches. Fix belongs in the Lun.Os session config: set the
+XSETTINGS `Gtk/Modules` to include `atk-bridge` (via xfconf `xsettings` channel), or export
+`GTK_MODULES=atk-bridge` in the session environment, so any launched GTK app exposes a11y.
+Until then, target the already-registered session apps for demos.
 
 ## Containers (the Lun.Os webtop/XFCE case)
 - The a11y bus GUID from `org.a11y.Bus.GetAddress` may be stale when the bus was
