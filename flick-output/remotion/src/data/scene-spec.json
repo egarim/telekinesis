@@ -1,0 +1,18 @@
+{
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "scenes": [
+    {
+      "id": "approved-scene-name",
+      "name": "Approved scene name",
+      "from": 0,
+      "durationInFrames": 90,
+      "title": "Approved scene name",
+      "body": "Replace this with the approved transcript lines and scene animation.",
+      "background": "#17151f",
+      "accent": "#ff7a59",
+      "soundEffects": []
+    }
+  ]
+}

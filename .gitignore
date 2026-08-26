@@ -2,3 +2,8 @@ bin/
 obj/
 *.user
 .DS_Store
+
+# flick / remotion
+flick-output/remotion/node_modules/
+flick-output/remotion/out/
+flick-output/scenes/
