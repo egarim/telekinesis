@@ -19,8 +19,12 @@ public sealed class BackendProvider : IAsyncDisposable
         if (OperatingSystem.IsLinux())
             return new AtSpiBackend();
         if (OperatingSystem.IsWindows())
+#if WINDOWS
+            return new Telekinesis.Windows.UiaBackend();
+#else
             throw new PlatformNotSupportedException(
-                "The Windows (UI Automation) backend is not implemented yet — it is the next milestone.");
+                "This build does not include the Windows backend; build/run the net10.0-windows target.");
+#endif
         if (OperatingSystem.IsMacOS())
             throw new PlatformNotSupportedException(
                 "The macOS (AXAPI) backend is not implemented yet.");

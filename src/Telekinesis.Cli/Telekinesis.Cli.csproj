@@ -2,7 +2,10 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- The Windows backend needs the desktop framework, so the CLI multi-targets:
+         plain net10.0 everywhere, net10.0-windows adds Telekinesis.Windows. -->
+    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Telekinesis.Cli</RootNamespace>
@@ -27,6 +30,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Telekinesis.Abstractions\Telekinesis.Abstractions.csproj" />
     <ProjectReference Include="..\Telekinesis.Linux\Telekinesis.Linux.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TargetFramework.Contains('-windows'))">
+    <ProjectReference Include="..\Telekinesis.Windows\Telekinesis.Windows.csproj" />
   </ItemGroup>
 
 </Project>
