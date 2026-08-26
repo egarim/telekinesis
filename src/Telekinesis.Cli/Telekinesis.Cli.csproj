@@ -27,6 +27,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Telekinesis.Abstractions\Telekinesis.Abstractions.csproj" />
     <ProjectReference Include="..\Telekinesis.Linux\Telekinesis.Linux.csproj" />
+    <ProjectReference Include="..\Telekinesis.MacOS\Telekinesis.MacOS.csproj" />
   </ItemGroup>
 
 </Project>

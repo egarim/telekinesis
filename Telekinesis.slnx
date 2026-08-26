@@ -3,5 +3,6 @@
     <Project Path="src/Telekinesis.Abstractions/Telekinesis.Abstractions.csproj" />
     <Project Path="src/Telekinesis.Cli/Telekinesis.Cli.csproj" />
     <Project Path="src/Telekinesis.Linux/Telekinesis.Linux.csproj" />
+    <Project Path="src/Telekinesis.MacOS/Telekinesis.MacOS.csproj" />
   </Folder>
 </Solution>
