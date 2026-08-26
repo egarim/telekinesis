@@ -1,0 +1,26 @@
+{
+  "name": "thunar-fill-location",
+  "narration": "An agent types into a real text field by semantic identity — and we read it back to prove it landed.",
+  "notes": "VALIDATED end-to-end on the live Lun.Os XFCE container (2026-08-26). Targets Thunar's editable location entry (role Text) via native AT-SPI EditableText (path=NativeAction) — no /dev/uinput. Demonstrates the demo-1 'fill this out' capability.",
+  "steps": [
+    { "say": "Finding the editable location field",
+      "tool": "find_elements",
+      "args": { "role": "Text", "applicationId": ":1.5" },
+      "bind": "field" },
+
+    { "say": "Reading what it says now",
+      "tool": "read_element",
+      "args": { "elementId": "{{field.Ref.Id}}", "applicationId": "{{field.Ref.ApplicationId}}" },
+      "bind": "before" },
+
+    { "say": "Typing a new path — through the accessibility tree, not the keyboard",
+      "tool": "set_text",
+      "args": { "elementId": "{{field.Ref.Id}}", "applicationId": "{{field.Ref.ApplicationId}}", "text": "/usr/local/" } },
+
+    { "say": "Verifying by reading the field back",
+      "tool": "read_element",
+      "args": { "elementId": "{{field.Ref.Id}}", "applicationId": "{{field.Ref.ApplicationId}}" },
+      "bind": "after",
+      "assert": "after.Text == '/usr/local/'" }
+  ]
+}
