@@ -36,14 +36,28 @@ public sealed class AtSpiBackend : IAccessibilityBackend
             throw new PlatformNotSupportedException(
                 "The AT-SPI backend requires Linux with a D-Bus session and the accessibility bus enabled.");
 
-        // The a11y bus is a separate bus whose address is published on the session bus.
-        using var session = new DBusConnection(DBusAddress.Session ?? throw new InvalidOperationException(
-            "DBUS_SESSION_BUS_ADDRESS is not set; no D-Bus session available."));
-        await session.ConnectAsync();
+        // Bound the whole connect sequence so a missing or wedged bus fails cleanly
+        // instead of hanging the caller (Tmds connect has no timeout of its own).
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+        var tk = timeoutCts.Token;
 
-        var address = StripGuid(await GetA11yBusAddressAsync(session));
-        _a11yConnection = new DBusConnection(address);
-        await _a11yConnection.ConnectAsync();
+        try
+        {
+            // The a11y bus is a separate bus whose address is published on the session bus.
+            using var session = new DBusConnection(DBusAddress.Session ?? throw new InvalidOperationException(
+                "DBUS_SESSION_BUS_ADDRESS is not set; no D-Bus session available."));
+            await session.ConnectAsync().AsTask().WaitAsync(tk);
+
+            var address = StripGuid(await GetA11yBusAddressAsync(session).WaitAsync(tk));
+            _a11yConnection = new DBusConnection(address);
+            await _a11yConnection.ConnectAsync().AsTask().WaitAsync(tk);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                "Timed out connecting to the accessibility bus. Check that it is running and enabled (telekinesis doctor).");
+        }
     }
 
     /// <summary>
