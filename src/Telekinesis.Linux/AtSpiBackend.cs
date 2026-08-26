@@ -18,6 +18,8 @@ public sealed class AtSpiBackend : IAccessibilityBackend
     private const string AccessibleIface = "org.a11y.atspi.Accessible";
 
     private DBusConnection? _a11yConnection;
+    private UinputInjector? _injector;
+    private readonly SemaphoreSlim _injectorGate = new(1, 1);
 
     public string Name => "AT-SPI (Linux)";
 
@@ -186,29 +188,205 @@ public sealed class AtSpiBackend : IAccessibilityBackend
 
     // ---- Actions ----
 
-    public Task<ActionResult> InvokeAsync(ElementRef element, string? action = null, CancellationToken ct = default)
-        => throw new NotImplementedException(
-            "TODO: org.a11y.atspi.Action.DoAction, falling back to ClickAsync via uinput.");
+    public async Task<ActionResult> InvokeAsync(ElementRef element, string? action = null, CancellationToken ct = default)
+    {
+        var (service, path) = DecodeRef(element);
+        // Try the native accessibility action first (index 0 = the default action).
+        if (await DoActionAsync(service, path, 0))
+            return ActionResult.Native();
+        // Fall back to a pointer click at the element's center.
+        return await ClickAsync(element, PointerButton.Left, ct);
+    }
 
-    public Task<ActionResult> SetTextAsync(ElementRef element, string text, CancellationToken ct = default)
-        => throw new NotImplementedException("TODO: org.a11y.atspi.EditableText.SetTextContents, fallback focus+type.");
+    public async Task<ActionResult> SetTextAsync(ElementRef element, string text, CancellationToken ct = default)
+    {
+        var (service, path) = DecodeRef(element);
+        if (await SetEditableTextAsync(service, path, text))
+            return ActionResult.Native();
+        // Fallback: focus via click, select all, type over the selection.
+        var click = await ClickAsync(element, PointerButton.Left, ct);
+        if (!click.Success) return click;
+        var inj = EnsureInjector();
+        inj.Chord([LinuxKeyMap.KEY_LEFTCTRL, LinuxKeyMap.KEY_A]);
+        inj.TypeText(text);
+        return ActionResult.Injected();
+    }
 
-    public Task<ActionResult> SetValueAsync(ElementRef element, double value, CancellationToken ct = default)
-        => throw new NotImplementedException("TODO: org.a11y.atspi.Value CurrentValue property.");
+    public async Task<ActionResult> SetValueAsync(ElementRef element, double value, CancellationToken ct = default)
+    {
+        var (service, path) = DecodeRef(element);
+        if (await SetValuePropertyAsync(service, path, value))
+            return ActionResult.Native();
+        return ActionResult.Failed(ActionPath.NativeAction,
+            "Element does not expose the AT-SPI Value interface.");
+    }
 
-    public Task<ActionResult> ClickAsync(ElementRef element, PointerButton button = PointerButton.Left, CancellationToken ct = default)
-        => throw new NotImplementedException("TODO: resolve bounds via Component.GetExtents, inject via uinput.");
+    public async Task<ActionResult> ClickAsync(ElementRef element, PointerButton button = PointerButton.Left, CancellationToken ct = default)
+    {
+        var (service, path) = DecodeRef(element);
+        var bounds = await GetExtentsAsync(service, path);
+        if (bounds is null || bounds.Width <= 0 || bounds.Height <= 0)
+            return ActionResult.Failed(ActionPath.InputInjection,
+                "Element has no on-screen bounds to click.");
+        try
+        {
+            var inj = await EnsureInjectorAsync(ct);
+            inj.MoveTo(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
+            inj.Click(ToBtn(button));
+            return ActionResult.Injected();
+        }
+        catch (Exception ex)
+        {
+            return ActionResult.Failed(ActionPath.InputInjection, ex.Message);
+        }
+    }
 
-    public Task<ActionResult> TypeTextAsync(string text, CancellationToken ct = default)
-        => throw new NotImplementedException("TODO: uinput key events.");
+    public async Task<ActionResult> TypeTextAsync(string text, CancellationToken ct = default)
+    {
+        try
+        {
+            (await EnsureInjectorAsync(ct)).TypeText(text);
+            return ActionResult.Injected();
+        }
+        catch (Exception ex)
+        {
+            return ActionResult.Failed(ActionPath.InputInjection, ex.Message);
+        }
+    }
 
-    public Task<ActionResult> PressKeysAsync(string combination, CancellationToken ct = default)
-        => throw new NotImplementedException("TODO: uinput key combination.");
+    public async Task<ActionResult> PressKeysAsync(string combination, CancellationToken ct = default)
+    {
+        var codes = new List<int>();
+        foreach (var part in combination.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (LinuxKeyMap.TryNamedKey(part, out var named)) codes.Add(named);
+            else if (part.Length == 1 && LinuxKeyMap.TryChar(part[0], out var code, out _)) codes.Add(code);
+            else return ActionResult.Failed(ActionPath.InputInjection, $"Unknown key '{part}'.");
+        }
+        if (codes.Count == 0)
+            return ActionResult.Failed(ActionPath.InputInjection, "Empty key combination.");
+        try
+        {
+            (await EnsureInjectorAsync(ct)).Chord(codes);
+            return ActionResult.Injected();
+        }
+        catch (Exception ex)
+        {
+            return ActionResult.Failed(ActionPath.InputInjection, ex.Message);
+        }
+    }
+
+    private static int ToBtn(PointerButton b) => b switch
+    {
+        PointerButton.Right => LinuxKeyMap.BTN_RIGHT,
+        PointerButton.Middle => LinuxKeyMap.BTN_MIDDLE,
+        _ => LinuxKeyMap.BTN_LEFT,
+    };
 
     public ValueTask DisposeAsync()
     {
+        _injector?.Dispose();
+        _injectorGate.Dispose();
         _a11yConnection?.Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    // ---- Injector lifecycle ----
+
+    private UinputInjector EnsureInjector() =>
+        _injector ?? throw new InvalidOperationException("Injector not initialized; call EnsureInjectorAsync.");
+
+    /// <summary>Lazily creates the virtual input device, sized to the desktop bounds.</summary>
+    private async Task<UinputInjector> EnsureInjectorAsync(CancellationToken ct)
+    {
+        if (_injector is not null) return _injector;
+        await _injectorGate.WaitAsync(ct);
+        try
+        {
+            if (_injector is null)
+            {
+                // The desktop root's extents give the screen size for ABS mapping.
+                var desktop = await GetExtentsAsync(RegistryService, RootPath);
+                var w = desktop is { Width: > 0 } ? desktop.Width : 1920;
+                var h = desktop is { Height: > 0 } ? desktop.Height : 1080;
+                _injector = new UinputInjector(w, h);
+            }
+            return _injector;
+        }
+        finally
+        {
+            _injectorGate.Release();
+        }
+    }
+
+    // ---- Native action D-Bus helpers ----
+
+    /// <summary>org.a11y.atspi.Action.DoAction(i index) → b. False if no Action interface.</summary>
+    private async Task<bool> DoActionAsync(string service, string path, int index)
+    {
+        MessageBuffer CreateMessage()
+        {
+            using var writer = Bus.GetMessageWriter();
+            writer.WriteMethodCallHeader(destination: service, path: path,
+                @interface: "org.a11y.atspi.Action", member: "DoAction", signature: "i");
+            writer.WriteInt32(index);
+            return writer.CreateMessage();
+        }
+        try
+        {
+            return await Bus.CallMethodAsync(CreateMessage(),
+                static (Message m, object? _) => m.GetBodyReader().ReadBool(), null);
+        }
+        catch (DBusExceptionBase)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>org.a11y.atspi.EditableText.SetTextContents(s) → b.</summary>
+    private async Task<bool> SetEditableTextAsync(string service, string path, string text)
+    {
+        MessageBuffer CreateMessage()
+        {
+            using var writer = Bus.GetMessageWriter();
+            writer.WriteMethodCallHeader(destination: service, path: path,
+                @interface: "org.a11y.atspi.EditableText", member: "SetTextContents", signature: "s");
+            writer.WriteString(text);
+            return writer.CreateMessage();
+        }
+        try
+        {
+            return await Bus.CallMethodAsync(CreateMessage(),
+                static (Message m, object? _) => m.GetBodyReader().ReadBool(), null);
+        }
+        catch (DBusExceptionBase)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Set org.a11y.atspi.Value.CurrentValue (d) via Properties.Set.</summary>
+    private async Task<bool> SetValuePropertyAsync(string service, string path, double value)
+    {
+        MessageBuffer CreateMessage()
+        {
+            using var writer = Bus.GetMessageWriter();
+            writer.WriteMethodCallHeader(destination: service, path: path,
+                @interface: "org.freedesktop.DBus.Properties", member: "Set", signature: "ssv");
+            writer.WriteString("org.a11y.atspi.Value");
+            writer.WriteString("CurrentValue");
+            writer.WriteVariantDouble(value);
+            return writer.CreateMessage();
+        }
+        try
+        {
+            await Bus.CallMethodAsync(CreateMessage());
+            return true;
+        }
+        catch (DBusExceptionBase)
+        {
+            return false;
+        }
     }
 
     // ---- D-Bus plumbing ----

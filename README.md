@@ -29,9 +29,12 @@ MCP client config:
 
 | OS | Perception | Actions | Status |
 |---|---|---|---|
-| Linux | AT-SPI over D-Bus (Tmds.DBus.Protocol) | AT-SPI Action → uinput fallback | in progress |
+| Linux | AT-SPI over D-Bus (Tmds.DBus.Protocol) — list, tree, find, states, bounds, text | AT-SPI Action/EditableText/Value → uinput fallback | perception + actions done; focus/events next |
 | Windows | UI Automation | UIA patterns → SendInput | planned |
 | macOS | AXAPI | AXPress → CGEvent | planned |
+
+> Actions are implemented against the spec but await runtime testing on a Linux
+> desktop session with `/dev/uinput` access.
 
 All backends implement `IAccessibilityBackend` from `Telekinesis.Abstractions`, with a
 normalized role/state vocabulary (UIA-modeled); the native role is always preserved in
