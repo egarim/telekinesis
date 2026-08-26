@@ -17,7 +17,7 @@ namespace Telekinesis.Windows;
 /// re-validates them on every use, throwing <see cref="StaleElementException"/>
 /// when the underlying element is gone — same discipline as the Linux backend.
 /// </summary>
-public sealed class UiaBackend : IAccessibilityBackend
+public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, IPointerInjectionBackend
 {
     private const int MaxChildScan = 256;    // per-node child walk cap (huge lists, virtualized grids)
     private const int MaxTextLength = 16384; // TextPattern read cap
@@ -425,6 +425,44 @@ public sealed class UiaBackend : IAccessibilityBackend
         try
         {
             _injector.Chord(codes);
+            return ActionResult.Injected();
+        }
+        catch (Exception ex)
+        {
+            return ActionResult.Failed(ActionPath.InputInjection, ex.Message);
+        }
+    }, ct);
+
+    // ---- Vision tier (IScreenCaptureBackend / IPointerInjectionBackend) ----
+
+    public Task<ScreenImage> CaptureScreenAsync(Bounds? region = null, CancellationToken ct = default) => Task.Run(() =>
+    {
+        var vs = SendInputInjector.VirtualScreen();
+        var b = region ?? new Bounds(vs.X, vs.Y, vs.Width, vs.Height);
+        if (b.Width <= 0 || b.Height <= 0)
+            throw new ArgumentException($"Capture region {b.Width}x{b.Height} is empty.");
+
+        // GDI capture: same physical-pixel space as UIA bounds and SendInput
+        // (the process is per-monitor-v2 DPI aware from ConnectAsync).
+        using var bmp = new System.Drawing.Bitmap(b.Width, b.Height,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = System.Drawing.Graphics.FromImage(bmp))
+            g.CopyFromScreen(b.X, b.Y, 0, 0, new System.Drawing.Size(b.Width, b.Height));
+        using var ms = new MemoryStream();
+        bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+        return new ScreenImage(ms.ToArray(), b.Width, b.Height);
+    }, ct);
+
+    public Task<ActionResult> ClickAtAsync(int x, int y, PointerButton button = PointerButton.Left, CancellationToken ct = default) => Task.Run(() =>
+    {
+        var vs = SendInputInjector.VirtualScreen();
+        if (x < vs.X || x >= vs.X + vs.Width || y < vs.Y || y >= vs.Y + vs.Height)
+            return ActionResult.Failed(ActionPath.InputInjection,
+                $"({x},{y}) is outside the virtual desktop {vs.Width}x{vs.Height} at ({vs.X},{vs.Y}).");
+        try
+        {
+            _injector.MoveTo(x, y);
+            _injector.Click(button);
             return ActionResult.Injected();
         }
         catch (Exception ex)

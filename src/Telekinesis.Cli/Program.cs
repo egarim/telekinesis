@@ -33,6 +33,13 @@ if (args.Contains("doctor"))
         if (!item.Ok && item.Remedy is not null)
             Console.WriteLine($"       fix: {item.Remedy}");
     }
+    // Vision tier is optional — report it, but never block readiness on it.
+    using (var parser = new Telekinesis.Vision.OmniParserClient())
+    {
+        var visionOk = await parser.ProbeAsync();
+        Console.WriteLine($"  [{(visionOk ? "ok" : "--")}] vision: OmniParser sidecar at {parser.BaseUrl} "
+            + (visionOk ? "is reachable." : $"not reachable (optional; see docs/VISION.md)."));
+    }
     Console.WriteLine(report.Ready ? "Ready." : "Not ready — fix the items above.");
     return report.Ready ? 0 : 1;
 }

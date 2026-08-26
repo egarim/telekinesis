@@ -86,6 +86,59 @@ public static class PerceptionTools
         return evt is null ? "null" : JsonSerializer.Serialize(evt, Json);
     }
 
+    // ---- Vision tier: for the moments when the accessibility tree fails ----
+
+    [McpServerTool(Name = "screenshot")]
+    [Description("Capture the screen (or a region) as PNG — the vision fallback for apps whose accessibility tree is empty or wrong. Prefer the semantic tools; pixels are expensive.")]
+    public static async Task<ModelContextProtocol.Protocol.ImageContentBlock> Screenshot(
+        BackendProvider provider,
+        [Description("Optional region 'x,y,width,height' in screen pixels; empty captures the whole virtual desktop.")] string? region,
+        CancellationToken ct)
+    {
+        var backend = await provider.GetConnectedAsync(ct);
+        if (backend is not IScreenCaptureBackend capture)
+            throw new NotSupportedException($"{backend.Name} does not support screen capture yet.");
+        var image = await capture.CaptureScreenAsync(ParseRegion(region), ct);
+        return new ModelContextProtocol.Protocol.ImageContentBlock
+        {
+            Data = image.PngData,
+            MimeType = "image/png",
+        };
+    }
+
+    [McpServerTool(Name = "parse_screen")]
+    [Description("Screenshot the screen (or a region) and parse it into UI elements with an OmniParser sidecar. Last resort when the accessibility tree fails; returned bounds are screen pixels usable with click_at. Requires an OmniParser server (see docs/VISION.md).")]
+    public static async Task<string> ParseScreen(
+        BackendProvider provider,
+        [Description("Optional region 'x,y,width,height' in screen pixels; empty parses the whole virtual desktop.")] string? region,
+        CancellationToken ct)
+    {
+        var backend = await provider.GetConnectedAsync(ct);
+        if (backend is not IScreenCaptureBackend capture)
+            throw new NotSupportedException($"{backend.Name} does not support screen capture yet.");
+
+        using var parser = new Telekinesis.Vision.OmniParserClient();
+        if (!await parser.ProbeAsync(ct))
+            throw new InvalidOperationException(
+                $"No OmniParser server at {parser.BaseUrl}. Start one (see docs/VISION.md) or set {Telekinesis.Vision.OmniParserClient.UrlEnvVar}.");
+
+        var r = ParseRegion(region);
+        var image = await capture.CaptureScreenAsync(r, ct);
+        var elements = await parser.ParseAsync(image, r is null ? null : (r.X, r.Y), ct);
+        return JsonSerializer.Serialize(elements, Json);
+    }
+
+    internal static Bounds? ParseRegion(string? region)
+    {
+        if (string.IsNullOrWhiteSpace(region)) return null;
+        var parts = region.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length != 4 ||
+            !int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var y) ||
+            !int.TryParse(parts[2], out var w) || !int.TryParse(parts[3], out var h))
+            throw new ArgumentException($"Malformed region '{region}' (expected 'x,y,width,height').");
+        return new Bounds(x, y, w, h);
+    }
+
     [McpServerTool(Name = "get_focused")]
     [Description("Get the currently focused element and its application — cheap orientation call.")]
     public static async Task<string> GetFocused(BackendProvider provider, CancellationToken ct)

@@ -71,6 +71,23 @@ public static class ActionTools
         return Audit("press_keys", combination, result);
     }
 
+    [McpServerTool(Name = "click_at")]
+    [Description("Pointer-click at raw screen coordinates via input injection. For vision-derived targets (parse_screen); prefer invoke/click on real elements when the accessibility tree works.")]
+    public static async Task<string> ClickAt(
+        BackendProvider provider,
+        [Description("Screen X in pixels.")] int x,
+        [Description("Screen Y in pixels.")] int y,
+        [Description("left, middle or right (default left).")] string? button,
+        CancellationToken ct)
+    {
+        var backend = await provider.GetConnectedAsync(ct);
+        if (backend is not IPointerInjectionBackend pointer)
+            throw new NotSupportedException($"{backend.Name} does not support coordinate clicks yet.");
+        var btn = Enum.TryParse<PointerButton>(button, ignoreCase: true, out var b) ? b : PointerButton.Left;
+        var result = await pointer.ClickAtAsync(x, y, btn, ct);
+        return Audit("click_at", $"({x},{y})", result);
+    }
+
     private static string Audit(string tool, string target, ActionResult result)
     {
         // Audit log: every action lands on stderr (visible in MCP client logs)

@@ -21,9 +21,13 @@ MCP client config:
   `get_tree`, `find_elements`, `read_element`, `get_focused`. Safe to expose; needs no
   input permissions. Password-field content is never exposed.
 - **Telekinesis mode** (default) — adds actions: `invoke`, `set_text`, `click`,
-  `type_text`, `press_keys`. Each action tries the native accessibility action first
-  and falls back to OS input injection, reporting which path ran. Every action is
-  audit-logged.
+  `type_text`, `press_keys`, `click_at`. Each action tries the native accessibility
+  action first and falls back to OS input injection, reporting which path ran. Every
+  action is audit-logged.
+- **Vision tier** (last resort) — for the moments when the accessibility tree fails:
+  `screenshot` captures pixels, `parse_screen` turns them into clickable elements via
+  an optional [OmniParser](https://github.com/microsoft/OmniParser) sidecar, and
+  `click_at` acts on them. See [docs/VISION.md](docs/VISION.md).
 
 ## Platform backends
 
