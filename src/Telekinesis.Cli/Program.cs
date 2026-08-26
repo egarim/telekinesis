@@ -7,6 +7,10 @@ using Telekinesis.Cli;
 // telekinesis --read-only → MCP server, perception tools only ("clairvoyant mode")
 // telekinesis doctor     → diagnose the environment and exit
 // telekinesis setup      → print the platform setup steps (udev rule, TCC, ...) and exit
+// telekinesis probe ...  → exercise the backend from the terminal (VM validation)
+
+if (args.Contains("probe"))
+    return await Probe.RunAsync(args);
 
 if (args.Contains("doctor"))
 {
