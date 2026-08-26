@@ -28,6 +28,7 @@ internal static class Probe
         var click = Opt("--click");
         var type = Opt("--type");
         var keys = Opt("--keys");
+        var setText = Opt("--set-text");
         var depth = int.TryParse(Opt("--depth"), out var d) ? d : 2;
         var actionsEnabled = args.Contains("--enable-actions");
 
@@ -48,6 +49,15 @@ internal static class Probe
 
         try
         {
+            if (setText is not null)
+            {
+                if (!actionsEnabled)
+                {
+                    Console.Error.WriteLine("Refusing to act without --enable-actions (read-only by default).");
+                    return 2;
+                }
+                return await RunSetTextAsync(backend, app, find, setText);
+            }
             return await DispatchAsync(backend, app, find, click, type, keys, depth, actionsEnabled);
         }
         catch (Exception ex)
@@ -102,6 +112,39 @@ internal static class Probe
             Console.WriteLine($"  {a.Name}   (id: {a.Id})");
         Console.WriteLine("\nInspect one with:  telekinesis probe --app <id> --depth 2");
         return 0;
+    }
+
+    /// <summary>Full demo flow: find an editable element, set its text natively, read it back to verify.</summary>
+    private static async Task<int> RunSetTextAsync(IAccessibilityBackend backend, string? app, string? find, string text)
+    {
+        // Prefer an explicitly named target; otherwise take the first editable element.
+        var query = new ElementQuery
+        {
+            ApplicationId = app,
+            NameContains = string.IsNullOrEmpty(find) ? null : find,
+            Role = string.IsNullOrEmpty(find) ? AccessibleRole.Text : null,
+            MaxResults = 5,
+        };
+        var matches = await backend.FindElementsAsync(query);
+        var target = matches.FirstOrDefault(m =>
+            m.Role is AccessibleRole.Text or AccessibleRole.Edit or AccessibleRole.Document) ?? matches.FirstOrDefault();
+        if (target is null)
+        {
+            Console.Error.WriteLine("No editable element found to fill.");
+            return 1;
+        }
+        Console.WriteLine($"Target: [{target.Role}] {Quote(target.Name)} {Fmt(target.Bounds)}");
+        Console.WriteLine($"Setting text: \"{text}\" ...");
+        var r = await backend.SetTextAsync(target.Ref, text);
+        Console.WriteLine($"  → success={r.Success} path={r.Path} {r.Error}");
+        if (!r.Success) return 1;
+
+        // Read it back through AT-SPI to prove the text really landed in the app.
+        var after = await backend.ReadElementAsync(target.Ref);
+        Console.WriteLine($"Read-back text: {Quote(after.Text)}");
+        var ok = after.Text is not null && after.Text.Contains(text.Split('\n')[0]);
+        Console.WriteLine(ok ? "VERIFIED: the app now contains the text." : "WARNING: read-back did not match.");
+        return ok ? 0 : 1;
     }
 
     private static async Task<int> RunActionsAsync(IAccessibilityBackend backend, string? app, string? click, string? type, string? keys)
