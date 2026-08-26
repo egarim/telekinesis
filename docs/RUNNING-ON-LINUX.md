@@ -54,4 +54,20 @@ dbus-run-session -- bash -c 'gtk4-widget-factory & sleep 6; telekinesis probe'
 ## What's proven working
 Connection + a11y-bus discovery, `list_applications`, tree walk (roles/names/bounds),
 `find_elements` with state filters, AT-SPI state (`au`) and extents (`(iiii)`) parsing,
-and uinput injection (`press_keys`). Validated against `gtk4-widget-factory`.
+and uinput injection (`press_keys`). Validated against `gtk4-widget-factory` on the host,
+**and against a live Lun.Os XFCE container desktop** (10 real apps, full panel tree,
+native button click).
+
+## Containers (the Lun.Os webtop/XFCE case)
+- The a11y bus GUID from `org.a11y.Bus.GetAddress` may be stale when the bus was
+  restarted; Telekinesis strips it and connects to the live socket. (If you see
+  "Unexpected GUID" on an older build, update.)
+- `/dev/uinput` usually isn't present in a container. **Native AT-SPI actions
+  (`invoke`/`set_text`/`set_value`) still work without it** — they use
+  `Action.DoAction`/`EditableText`, validated by clicking a real XFCE panel button
+  (`path=NativeAction`). Only the injection fallbacks (`click` by coordinate,
+  `type_text`, `press_keys`) need `/dev/uinput` passed into the container.
+- Enable a11y inside the container the same way (`toolkit-accessibility true` /
+  `org.a11y.Status.IsEnabled=true`) — it defaults off there too.
+- Find the session bus with: read `DBUS_SESSION_BUS_ADDRESS` from a GUI process's
+  `/proc/<pid>/environ`, or test the `/tmp/dbus-*` sockets for `org.a11y.Bus`.
