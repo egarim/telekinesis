@@ -41,9 +41,27 @@ public sealed class AtSpiBackend : IAccessibilityBackend
             "DBUS_SESSION_BUS_ADDRESS is not set; no D-Bus session available."));
         await session.ConnectAsync();
 
-        var address = await GetA11yBusAddressAsync(session);
+        var address = StripGuid(await GetA11yBusAddressAsync(session));
         _a11yConnection = new DBusConnection(address);
         await _a11yConnection.ConnectAsync();
+    }
+
+    /// <summary>
+    /// Removes the <c>guid=…</c> parameter from a D-Bus address. org.a11y.Bus.GetAddress
+    /// can return a stale guid when the a11y bus has been restarted (common with
+    /// containerised desktops), and Tmds validates it strictly, failing with
+    /// "Unexpected GUID". Without a pinned guid we accept the live daemon on the socket.
+    /// </summary>
+    private static string StripGuid(string address)
+    {
+        var entries = address.Split(';', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < entries.Length; i++)
+        {
+            var parts = entries[i].Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Where(p => !p.StartsWith("guid=", StringComparison.OrdinalIgnoreCase));
+            entries[i] = string.Join(',', parts);
+        }
+        return string.Join(';', entries);
     }
 
     public async Task<DiagnosticReport> DiagnoseAsync(CancellationToken ct = default)
