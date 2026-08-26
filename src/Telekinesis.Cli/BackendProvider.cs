@@ -22,8 +22,7 @@ public sealed class BackendProvider : IAsyncDisposable
             throw new PlatformNotSupportedException(
                 "The Windows (UI Automation) backend is not implemented yet — it is the next milestone.");
         if (OperatingSystem.IsMacOS())
-            throw new PlatformNotSupportedException(
-                "The macOS (AXAPI) backend is not implemented yet.");
+            return new Telekinesis.MacOS.AxBackend();
         throw new PlatformNotSupportedException("Unsupported operating system.");
     }
 
