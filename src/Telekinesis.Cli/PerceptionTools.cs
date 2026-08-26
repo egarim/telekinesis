@@ -73,6 +73,19 @@ public static class PerceptionTools
         return JsonSerializer.Serialize(element, Json);
     }
 
+    [McpServerTool(Name = "wait_for")]
+    [Description("Wait for an accessibility event (e.g. 'focus-changed', or 'state-changed:<name>') up to a timeout. Use after an action to verify its effect instead of polling. Returns the event, or null on timeout.")]
+    public static async Task<string> WaitFor(
+        BackendProvider provider,
+        [Description("Event kind, e.g. 'focus-changed'. Empty matches any event.")] string kind,
+        [Description("Timeout in milliseconds (default 2000).")] int timeoutMs,
+        CancellationToken ct)
+    {
+        var backend = await provider.GetConnectedAsync(ct);
+        var evt = await backend.WaitForEventAsync(kind ?? "", TimeSpan.FromMilliseconds(timeoutMs <= 0 ? 2000 : timeoutMs), ct);
+        return evt is null ? "null" : JsonSerializer.Serialize(evt, Json);
+    }
+
     [McpServerTool(Name = "get_focused")]
     [Description("Get the currently focused element and its application — cheap orientation call.")]
     public static async Task<string> GetFocused(BackendProvider provider, CancellationToken ct)

@@ -21,6 +21,13 @@ public sealed class AtSpiBackend : IAccessibilityBackend
     private UinputInjector? _injector;
     private readonly SemaphoreSlim _injectorGate = new(1, 1);
 
+    // Event tracking (focus + generic state changes).
+    private readonly SemaphoreSlim _eventGate = new(1, 1);
+    private readonly List<(string Kind, TaskCompletionSource<AccessibilityEvent> Tcs)> _waiters = new();
+    private readonly List<IDisposable> _subscriptions = new();
+    private volatile ElementRef? _lastFocused;
+    private bool _eventsReady;
+
     public string Name => "AT-SPI (Linux)";
 
     public async Task ConnectAsync(CancellationToken ct = default)
@@ -178,13 +185,43 @@ public sealed class AtSpiBackend : IAccessibilityBackend
         }
     }
 
-    public Task<AccessibleElement?> GetFocusedAsync(CancellationToken ct = default)
-        => throw new NotImplementedException(
-            "TODO: track state-changed:focused signals; requires RegisterEvent on the registry.");
+    public async Task<AccessibleElement?> GetFocusedAsync(CancellationToken ct = default)
+    {
+        await EnsureEventsAsync(ct);
+        var focused = _lastFocused;
+        if (focused is null) return null;
+        try
+        {
+            return await ReadElementAsync(focused, ct);
+        }
+        catch (StaleElementException)
+        {
+            return null;
+        }
+    }
 
-    public Task<AccessibilityEvent?> WaitForEventAsync(string kind, TimeSpan timeout, CancellationToken ct = default)
-        => throw new NotImplementedException(
-            "TODO: subscribe to org.a11y.atspi.Event.* signals and surface them as AccessibilityEvents.");
+    public async Task<AccessibilityEvent?> WaitForEventAsync(string kind, TimeSpan timeout, CancellationToken ct = default)
+    {
+        await EnsureEventsAsync(ct);
+        var tcs = new TaskCompletionSource<AccessibilityEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiter = (Kind: kind, Tcs: tcs);
+        lock (_waiters) _waiters.Add(waiter);
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(timeout);
+            using (timeoutCts.Token.Register(() => tcs.TrySetCanceled()))
+                return await tcs.Task;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return null; // timed out
+        }
+        finally
+        {
+            lock (_waiters) _waiters.Remove(waiter);
+        }
+    }
 
     // ---- Actions ----
 
@@ -285,8 +322,10 @@ public sealed class AtSpiBackend : IAccessibilityBackend
 
     public ValueTask DisposeAsync()
     {
+        foreach (var sub in _subscriptions) sub.Dispose();
         _injector?.Dispose();
         _injectorGate.Dispose();
+        _eventGate.Dispose();
         _a11yConnection?.Dispose();
         return ValueTask.CompletedTask;
     }
@@ -317,6 +356,96 @@ public sealed class AtSpiBackend : IAccessibilityBackend
         {
             _injectorGate.Release();
         }
+    }
+
+    // ---- Event subscription ----
+
+    private const string EventObjectIface = "org.a11y.atspi.Event.Object";
+
+    /// <summary>
+    /// One-time setup: register interest with the AT-SPI registry and start
+    /// watching object state-changed signals to track focus and feed waiters.
+    /// </summary>
+    private async Task EnsureEventsAsync(CancellationToken ct)
+    {
+        if (_eventsReady) return;
+        await _eventGate.WaitAsync(ct);
+        try
+        {
+            if (_eventsReady) return;
+
+            // Ask the registry to route the events we care about to us.
+            await RegisterEventAsync("object:state-changed:focused");
+
+            // Watch StateChanged from any sender/path; filter by minor client-side.
+            // Body signature is "siiv(so)": minor, detail1, detail2, any_data, (source).
+            var sub = await Bus.WatchSignalAsync(
+                null!, EventObjectIface, null!, "StateChanged",
+                (Message m, object? _) =>
+                {
+                    var reader = m.GetBodyReader();
+                    var minor = reader.ReadString();
+                    var detail1 = reader.ReadInt32();
+                    reader.ReadInt32();               // detail2 (unused)
+                    reader.ReadVariantValue();        // any_data (skip)
+                    reader.AlignStruct();
+                    var srcService = reader.ReadString();
+                    var srcPath = reader.ReadObjectPathAsString();
+                    return new RawStateEvent(minor, detail1, srcService, srcPath);
+                },
+                (Notification<RawStateEvent> n) =>
+                {
+                    if (n.Exception is not null || !n.HasValue) return;
+                    OnStateChanged(n.Value);
+                },
+                ObserverFlags.None, true, null!);
+
+            _subscriptions.Add(sub);
+            _eventsReady = true;
+        }
+        finally
+        {
+            _eventGate.Release();
+        }
+    }
+
+    private readonly record struct RawStateEvent(string Minor, int Detail1, string SrcService, string SrcPath);
+
+    private void OnStateChanged(RawStateEvent e)
+    {
+        // Focus gained: minor "focused", detail1 == 1.
+        if (e.Minor == "focused" && e.Detail1 == 1)
+        {
+            var reference = EncodeRef(e.SrcService, e.SrcPath);
+            _lastFocused = reference;
+            Dispatch("focus-changed", reference);
+        }
+        Dispatch($"state-changed:{e.Minor}", EncodeRef(e.SrcService, e.SrcPath));
+    }
+
+    private void Dispatch(string kind, ElementRef source)
+    {
+        var evt = new AccessibilityEvent(kind, source, DateTimeOffset.Now);
+        (string Kind, TaskCompletionSource<AccessibilityEvent> Tcs)[] snapshot;
+        lock (_waiters) snapshot = _waiters.ToArray();
+        foreach (var w in snapshot)
+            if (w.Kind == kind || w.Kind.Length == 0)
+                w.Tcs.TrySetResult(evt);
+    }
+
+    /// <summary>org.a11y.atspi.Registry.RegisterEvent(s eventName).</summary>
+    private async Task RegisterEventAsync(string eventName)
+    {
+        MessageBuffer CreateMessage()
+        {
+            using var writer = Bus.GetMessageWriter();
+            writer.WriteMethodCallHeader(destination: RegistryService, path: "/org/a11y/atspi/registry",
+                @interface: "org.a11y.atspi.Registry", member: "RegisterEvent", signature: "s");
+            writer.WriteString(eventName);
+            return writer.CreateMessage();
+        }
+        try { await Bus.CallMethodAsync(CreateMessage()); }
+        catch (DBusExceptionBase) { /* registry may auto-route; watching still works */ }
     }
 
     // ---- Native action D-Bus helpers ----

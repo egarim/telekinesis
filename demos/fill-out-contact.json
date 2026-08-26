@@ -1,0 +1,39 @@
+{
+  "name": "fill-out-contact",
+  "narration": "An agent fills a contact form by field name — not pixel coordinates.",
+  "steps": [
+    { "say": "Locating the First Name field by its accessible name",
+      "tool": "find_elements",
+      "args": { "role": "Edit", "nameContains": "First" },
+      "bind": "first" },
+
+    { "say": "Typing the first name",
+      "tool": "set_text",
+      "args": { "elementId": "{{first.Ref.Id}}", "applicationId": "{{first.Ref.ApplicationId}}", "text": "Ada" } },
+
+    { "say": "Locating the Last Name field",
+      "tool": "find_elements",
+      "args": { "role": "Edit", "nameContains": "Last" },
+      "bind": "last" },
+
+    { "say": "Typing the last name",
+      "tool": "set_text",
+      "args": { "elementId": "{{last.Ref.Id}}", "applicationId": "{{last.Ref.ApplicationId}}", "text": "Lovelace" } },
+
+    { "say": "Locating the Email field",
+      "tool": "find_elements",
+      "args": { "role": "Edit", "nameContains": "Email" },
+      "bind": "email" },
+
+    { "say": "Typing the email",
+      "tool": "set_text",
+      "args": { "elementId": "{{email.Ref.Id}}", "applicationId": "{{email.Ref.ApplicationId}}", "text": "ada@analytical.engine" } },
+
+    { "say": "Clicking Save — via the native accessibility action, falling back to a click",
+      "tool": "invoke",
+      "args": { "elementId": "{{save.Ref.Id}}", "applicationId": "{{save.Ref.ApplicationId}}" },
+      "pre": [
+        { "tool": "find_elements", "args": { "role": "Button", "nameContains": "Save" }, "bind": "save" }
+      ] }
+  ]
+}
