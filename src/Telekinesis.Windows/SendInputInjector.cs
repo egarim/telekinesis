@@ -11,6 +11,12 @@ namespace Telekinesis.Windows;
 /// </summary>
 internal sealed class SendInputInjector
 {
+    /// <summary>The virtual desktop rectangle — shared with screen capture so
+    /// what vision sees is exactly where clicks land.</summary>
+    internal static (int X, int Y, int Width, int Height) VirtualScreen() => (
+        GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+        Math.Max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN)), Math.Max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN)));
+
     public void MoveTo(int x, int y)
     {
         // Absolute coordinates are normalized to 0..65535 over the *virtual* desktop
