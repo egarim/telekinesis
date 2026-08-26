@@ -8,6 +8,7 @@ internal static class AtSpiRoleMap
     private static readonly Dictionary<string, AccessibleRole> Map = new(StringComparer.OrdinalIgnoreCase)
     {
         ["application"] = AccessibleRole.Application,
+        ["desktop frame"] = AccessibleRole.Pane,
         ["frame"] = AccessibleRole.Window,
         ["window"] = AccessibleRole.Window,
         ["dialog"] = AccessibleRole.Dialog,
