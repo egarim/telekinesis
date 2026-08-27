@@ -1,0 +1,51 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="WhackAMole.MainWindow"
+        Title="Whack-a-Mole — agent reaction benchmark"
+        Width="1100" Height="720">
+  <DockPanel>
+    <Border DockPanel.Dock="Right" Width="280" Padding="16" Background="#181C22">
+      <StackPanel Spacing="14">
+        <TextBlock Text="Whack-a-Mole" FontSize="24" FontWeight="Bold" Foreground="White"/>
+        <TextBlock Text="A target appears at a random spot. The app itself measures how long the agent takes to hit it — spawn to click, in milliseconds."
+                   TextWrapping="Wrap" Foreground="#8892A0" FontSize="12"/>
+
+        <Button Name="StartButton" AutomationProperties.Name="Start round"
+                Content="Start round" HorizontalAlignment="Stretch" Click="OnStartClick"/>
+
+        <Border Background="#232A33" CornerRadius="8" Padding="12">
+          <StackPanel Spacing="6">
+            <TextBlock Name="LastText" AutomationProperties.Name="Last reaction"
+                       Text="Last: —" FontSize="18" FontWeight="SemiBold" Foreground="#6BCB77"/>
+            <TextBlock Name="AvgText" AutomationProperties.Name="Average reaction"
+                       Text="Average: —" FontSize="14" Foreground="#AAB4C0"/>
+            <TextBlock Name="BestText" AutomationProperties.Name="Best reaction"
+                       Text="Best: —" FontSize="14" Foreground="#AAB4C0"/>
+            <TextBlock Name="ScoreText" AutomationProperties.Name="Score"
+                       Text="Hits 0 · Misses 0" FontSize="14" Foreground="#AAB4C0"/>
+          </StackPanel>
+        </Border>
+
+        <StackPanel Spacing="4">
+          <TextBlock Text="Target lifetime (ms)" Foreground="#AAB4C0" FontSize="12"/>
+          <Slider Name="LifetimeSlider" AutomationProperties.Name="Target lifetime"
+                  Minimum="500" Maximum="5000" Value="3000" TickFrequency="100" IsSnapToTickEnabled="True"/>
+          <TextBlock Name="LifetimeText" Text="3000 ms" Foreground="#66707C" FontSize="11"/>
+        </StackPanel>
+
+        <TextBlock Name="StatusText" AutomationProperties.Name="Round status"
+                   Text="Idle" Foreground="#8892A0" FontSize="12"/>
+        <TextBlock Name="LogText" AutomationProperties.Name="Hit log" TextWrapping="Wrap"
+                   Text="" Foreground="#66707C" FontSize="11"/>
+      </StackPanel>
+    </Border>
+
+    <Canvas Name="Arena" Background="#0E1116">
+      <Button Name="Target" AutomationProperties.Name="Hit target"
+              Content="HIT" FontSize="22" FontWeight="Bold"
+              Width="110" Height="110" CornerRadius="55"
+              Background="#E4572E" Foreground="White"
+              IsVisible="False" Click="OnTargetClick"/>
+    </Canvas>
+  </DockPanel>
+</Window>

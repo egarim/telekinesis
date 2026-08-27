@@ -12,6 +12,10 @@ using Telekinesis.Cli;
 if (args.Contains("probe"))
     return await Probe.RunAsync(args);
 
+// telekinesis repl [--enable-actions] → persistent session, commands on stdin, per-command timing
+if (args.Contains("repl"))
+    return await Repl.RunAsync(args);
+
 if (args.Contains("doctor"))
 {
     await using var provider = new BackendProvider();
