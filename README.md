@@ -9,9 +9,9 @@ at a fraction of the cost of screenshot-driven computer use.
 
 **Watch it work** (YouTube Shorts — click to play):
 
-| [![The helpful ghost](https://img.youtube.com/vi/Tv_lZBmAVGI/maxresdefault.jpg)](https://youtube.com/shorts/Tv_lZBmAVGI) | [![Three apps, zero screenshots](https://img.youtube.com/vi/-a5_3NY6MuI/maxresdefault.jpg)](https://youtube.com/shorts/-a5_3NY6MuI) | [![The principle: the accessibility tree](https://img.youtube.com/vi/fsNQ3THudmk/maxresdefault.jpg)](https://youtube.com/shorts/fsNQ3THudmk) |
-|:---:|:---:|:---:|
-| [The helpful ghost](https://youtube.com/shorts/Tv_lZBmAVGI) | [Three apps, zero screenshots](https://youtube.com/shorts/-a5_3NY6MuI) | [The principle](https://youtube.com/shorts/fsNQ3THudmk) |
+| [![The helpful ghost](https://img.youtube.com/vi/Tv_lZBmAVGI/maxresdefault.jpg)](https://youtube.com/shorts/Tv_lZBmAVGI) | [![Three apps, zero screenshots](https://img.youtube.com/vi/-a5_3NY6MuI/maxresdefault.jpg)](https://youtube.com/shorts/-a5_3NY6MuI) | [![The principle: the accessibility tree](https://img.youtube.com/vi/fsNQ3THudmk/maxresdefault.jpg)](https://youtube.com/shorts/fsNQ3THudmk) | [![Install it in 2 minutes](https://img.youtube.com/vi/BxQB6I0dPco/maxresdefault.jpg)](https://youtube.com/shorts/BxQB6I0dPco) |
+|:---:|:---:|:---:|:---:|
+| [The helpful ghost](https://youtube.com/shorts/Tv_lZBmAVGI) | [Three apps, zero screenshots](https://youtube.com/shorts/-a5_3NY6MuI) | [The principle](https://youtube.com/shorts/fsNQ3THudmk) | [Install & wire it up](https://youtube.com/shorts/BxQB6I0dPco) |
 
 ```
 dotnet tool install -g Telekinesis
