@@ -78,10 +78,10 @@ Accessibility permission).
 
 ## License
 
-[FSL-1.1-MIT](LICENSE.md) (Functional Source License): free to use, modify, and
-redistribute for any purpose **except building a competing product**; each release
-automatically becomes plain MIT two years after publication. Version 0.1.0 was
-released under MIT and remains MIT. Commercial licensing: joche.ojeda@bitframeworks.com.
+**Dual-licensed.** Use it under [AGPL-3.0](LICENSE) for free — including commercially —
+as long as you share source per the AGPL. Embedding it in a proprietary product or
+closed service instead? Get a [commercial license](COMMERCIAL.md):
+joche.ojeda@bitframeworks.com. (0.1.0 remains MIT; 0.2.0 remains FSL-1.1-MIT.)
 
 ## Security
 
