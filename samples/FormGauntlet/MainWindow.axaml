@@ -1,0 +1,60 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="FormGauntlet.MainWindow"
+        Title="Claim Form — Telekinesis gauntlet"
+        Width="1100" Height="720">
+  <Grid ColumnDefinitions="*,340">
+    <ScrollViewer Grid.Column="0" Padding="24">
+      <StackPanel Spacing="12" MaxWidth="560" HorizontalAlignment="Left">
+        <TextBlock Text="Insurance claim" FontSize="26" FontWeight="Bold"/>
+        <TextBlock Text="All fields are validated on submit. Errors appear in the panel on the right — fix them and resubmit."
+                   TextWrapping="Wrap" Foreground="#8892A0" FontSize="12"/>
+
+        <TextBlock Text="Full name"/>
+        <TextBox Name="NameBox" AutomationProperties.Name="Full name" Watermark="First Last"/>
+
+        <TextBlock Text="Email"/>
+        <TextBox Name="EmailBox" AutomationProperties.Name="Email address" Watermark="you@example.com"/>
+
+        <TextBlock Text="Policy number"/>
+        <TextBox Name="PolicyBox" AutomationProperties.Name="Policy number" Watermark="POL-12345"/>
+
+        <TextBlock Text="Incident date"/>
+        <TextBox Name="DateBox" AutomationProperties.Name="Incident date" Watermark="YYYY-MM-DD"/>
+
+        <TextBlock Text="Claim amount (USD)"/>
+        <TextBox Name="AmountBox" AutomationProperties.Name="Claim amount" Watermark="0.00"/>
+
+        <TextBlock Text="Incident type"/>
+        <ComboBox Name="TypeCombo" AutomationProperties.Name="Incident type selector" HorizontalAlignment="Stretch">
+          <ComboBoxItem>Collision</ComboBoxItem>
+          <ComboBoxItem>Theft</ComboBoxItem>
+          <ComboBoxItem>Weather damage</ComboBoxItem>
+          <ComboBoxItem>Other</ComboBoxItem>
+        </ComboBox>
+
+        <TextBlock Text="Description (at least 20 characters)"/>
+        <TextBox Name="DescriptionBox" AutomationProperties.Name="Incident description"
+                 AcceptsReturn="True" Height="80" TextWrapping="Wrap"/>
+
+        <CheckBox Name="ConsentCheck" AutomationProperties.Name="Accuracy consent"
+                  Content="I confirm the information above is accurate"/>
+
+        <Button Name="SubmitButton" AutomationProperties.Name="Submit claim"
+                Content="Submit claim" Click="OnSubmitClick"/>
+      </StackPanel>
+    </ScrollViewer>
+
+    <Border Grid.Column="1" Padding="16" Background="#181C22">
+      <StackPanel Spacing="12">
+        <TextBlock Text="Validation" FontSize="18" FontWeight="Bold" Foreground="White"/>
+        <TextBlock Name="StatusText" AutomationProperties.Name="Form status"
+                   Text="Draft" FontSize="14" Foreground="#8892A0"/>
+        <TextBlock Name="ErrorsText" AutomationProperties.Name="Validation errors"
+                   Text="" TextWrapping="Wrap" Foreground="#E4572E" FontSize="13"/>
+        <TextBlock Name="ResultText" AutomationProperties.Name="Submission result"
+                   Text="" TextWrapping="Wrap" Foreground="#6BCB77" FontSize="14" FontWeight="SemiBold"/>
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

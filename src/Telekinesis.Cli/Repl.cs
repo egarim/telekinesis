@@ -34,7 +34,7 @@ public static class Repl
         string? line;
         while ((line = Console.ReadLine()) is not null)
         {
-            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var parts = Tokenize(line);
             if (parts.Length == 0) continue;
             var cmd = parts[0].ToLowerInvariant();
             if (cmd is "quit" or "exit") break;
@@ -70,16 +70,35 @@ public static class Repl
                     case "click" when parts.Length >= 3:
                     {
                         if (!RequireActions(actionsEnabled)) break;
-                        var target = await FindOneAsync(backend, parts[1], string.Join(' ', parts[2..]));
+                        // Prefer things made to be clicked — plain Text matching the words
+                        // (a label, an error message) must not shadow the actual control.
+                        var clickName = string.Join(' ', parts[2..]);
+                        var target = await FindOneAsync(backend, parts[1], clickName, AccessibleRole.Button)
+                                     ?? await FindOneAsync(backend, parts[1], clickName, AccessibleRole.CheckBox)
+                                     ?? await FindOneAsync(backend, parts[1], clickName, AccessibleRole.ListItem)
+                                     ?? await FindOneAsync(backend, parts[1], clickName, AccessibleRole.MenuItem)
+                                     ?? await FindOneAsync(backend, parts[1], clickName);
                         if (target is null) { Console.WriteLine("  (no match)"); break; }
                         var r = await backend.InvokeAsync(target.Ref);
+                        Console.WriteLine($"  [{target.Role}] \"{target.Name}\" → success={r.Success} path={r.Path} {r.Error}");
+                        break;
+                    }
+                    case "expand" or "collapse" or "toggle" when parts.Length >= 3:
+                    {
+                        if (!RequireActions(actionsEnabled)) break;
+                        var target = await FindOneAsync(backend, parts[1], string.Join(' ', parts[2..]));
+                        if (target is null) { Console.WriteLine("  (no match)"); break; }
+                        var r = await backend.InvokeAsync(target.Ref, cmd);
                         Console.WriteLine($"  [{target.Role}] \"{target.Name}\" → success={r.Success} path={r.Path} {r.Error}");
                         break;
                     }
                     case "settext" when parts.Length >= 4:
                     {
                         if (!RequireActions(actionsEnabled)) break;
-                        var target = await FindOneAsync(backend, parts[1], parts[2]);
+                        // Prefer an actual editor: a field's label often carries the same name.
+                        var target = await FindOneAsync(backend, parts[1], parts[2], AccessibleRole.Edit)
+                                     ?? await FindOneAsync(backend, parts[1], parts[2], AccessibleRole.Document)
+                                     ?? await FindOneAsync(backend, parts[1], parts[2]);
                         if (target is null) { Console.WriteLine("  (no match)"); break; }
                         var r = await backend.SetTextAsync(target.Ref, string.Join(' ', parts[3..]));
                         Console.WriteLine($"  [{target.Role}] \"{target.Name}\" → success={r.Success} path={r.Path} {r.Error}");
@@ -106,17 +125,37 @@ public static class Repl
         return 0;
     }
 
+    /// <summary>Split on spaces, honoring double quotes: settext pid:1 "Incident date" 2026-08-20</summary>
+    private static string[] Tokenize(string line)
+    {
+        var tokens = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var inQuotes = false;
+        foreach (var c in line)
+        {
+            if (c == '"') { inQuotes = !inQuotes; continue; }
+            if (c == ' ' && !inQuotes)
+            {
+                if (current.Length > 0) { tokens.Add(current.ToString()); current.Clear(); }
+                continue;
+            }
+            current.Append(c);
+        }
+        if (current.Length > 0) tokens.Add(current.ToString());
+        return tokens.ToArray();
+    }
+
     private static bool RequireActions(bool enabled)
     {
         if (!enabled) Console.WriteLine("  refused: start repl with --enable-actions");
         return enabled;
     }
 
-    private static async Task<AccessibleElement?> FindOneAsync(IAccessibilityBackend backend, string app, string name)
+    private static async Task<AccessibleElement?> FindOneAsync(IAccessibilityBackend backend, string app, string name, AccessibleRole? role = null)
     {
         var found = await backend.FindElementsAsync(new ElementQuery
         {
-            ApplicationId = app, NameContains = name, MaxResults = 1,
+            ApplicationId = app, NameContains = name, Role = role, MaxResults = 1,
         });
         return found.Count > 0 ? found[0] : null;
     }
