@@ -14,13 +14,15 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>telekinesis</ToolCommandName>
     <PackageId>Telekinesis</PackageId>
-    <Version>0.1.0</Version>
     <Authors>Joche Ojeda</Authors>
     <Description>Telekinesis — an MCP server that lets AI agents see and control the desktop through platform accessibility APIs (AT-SPI, UIA, AXAPI). Move things without touching them.</Description>
     <PackageTags>mcp;accessibility;automation;at-spi;uia;agent;desktop</PackageTags>
     <RepositoryUrl>https://github.com/egarim/telekinesis</RepositoryUrl>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- FSL-1.1-MIT: source-available, no competing products, converts to MIT after 2 years.
+         Not an SPDX expression NuGet accepts, so the license ships as a file. -->
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Version>0.2.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -46,6 +48,7 @@
          dotnet pack src/Telekinesis.Cli -c Release -p:TargetFrameworks=net10.0 -p:PackWinPayload=true -o artifacts -->
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="..\..\LICENSE.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(PackWinPayload)' == 'true'">

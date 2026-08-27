@@ -76,6 +76,13 @@ Run `telekinesis doctor` to diagnose your environment and `telekinesis setup` fo
 platform steps (Linux udev rule for `/dev/uinput`, enabling the a11y bus, macOS
 Accessibility permission).
 
+## License
+
+[FSL-1.1-MIT](LICENSE.md) (Functional Source License): free to use, modify, and
+redistribute for any purpose **except building a competing product**; each release
+automatically becomes plain MIT two years after publication. Version 0.1.0 was
+released under MIT and remains MIT. Commercial licensing: joche.ojeda@bitframeworks.com.
+
 ## Security
 
 This is total-machine-control tooling. Run it only for agents you trust, prefer
