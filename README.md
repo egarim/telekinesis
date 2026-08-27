@@ -1,9 +1,16 @@
 # Telekinesis
 
+<img src="docs/media/telekinesis-mascot-512.png" alt="The Telekinesis ghost" width="160" align="right"/>
+
 **Move things without touching them.** Telekinesis is an MCP server that lets AI agents
 see and control the desktop through the platform accessibility APIs — the same channel
 screen readers use. Semantic perception ("the Save button") instead of pixel-guessing,
 at a fraction of the cost of screenshot-driven computer use.
+
+**Watch it work** (YouTube Shorts):
+[the helpful ghost](https://youtube.com/shorts/Tv_lZBmAVGI) ·
+[three apps, zero screenshots](https://youtube.com/shorts/-a5_3NY6MuI) ·
+[the principle: the accessibility tree](https://youtube.com/shorts/fsNQ3THudmk)
 
 ```
 dotnet tool install -g Telekinesis
@@ -52,6 +59,16 @@ normalized role/state vocabulary (UIA-modeled); the native role is always preser
 Uno Platform apps on Linux become visible to Telekinesis via
 [uno-atspi-bridge](https://github.com/egarim/uno-atspi-bridge), which publishes Uno's
 `AutomationPeer` tree onto the accessibility bus.
+
+## Samples — real apps, driven live
+
+Three Avalonia stress-test apps live in [`samples/`](samples/), each with a recorded
+session of Telekinesis driving it (all native patterns, verified by read-back):
+
+| | | |
+|:---:|:---:|:---:|
+| [![Pong Wars](docs/media/pongwars-demo.png)](samples/PongWars) | [![Whack-a-Mole](docs/media/whackamole-demo.png)](samples/WhackAMole) | [![Form Gauntlet](docs/media/formgauntlet-demo.png)](samples/FormGauntlet) |
+| [**PongWars**](samples/PongWars) — drive the controls around an a11y-opaque canvas | [**WhackAMole**](samples/WhackAMole) — reaction benchmark: 46/0 hits, avg **110 ms**, best **27 ms** | [**FormGauntlet**](samples/FormGauntlet) — fill → rejected → read the errors → accepted |
 
 ## Setup
 
