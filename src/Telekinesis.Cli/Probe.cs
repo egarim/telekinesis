@@ -29,6 +29,7 @@ internal static class Probe
         var type = Opt("--type");
         var keys = Opt("--keys");
         var setText = Opt("--set-text");
+        var setValue = Opt("--set-value");
         var screenshot = Opt("--screenshot");
         var parse = args.Contains("--parse");
         var clickAt = Opt("--click-at");
@@ -74,6 +75,15 @@ internal static class Probe
                     return 2;
                 }
                 return await RunSetTextAsync(backend, app, find, setText);
+            }
+            if (setValue is not null)
+            {
+                if (!actionsEnabled)
+                {
+                    Console.Error.WriteLine("Refusing to act without --enable-actions (read-only by default).");
+                    return 2;
+                }
+                return await RunSetValueAsync(backend, app, find, setValue);
             }
             return await DispatchAsync(backend, app, find, click, type, keys, depth, actionsEnabled);
         }
@@ -178,6 +188,47 @@ internal static class Probe
         return ok ? 0 : 1;
     }
 
+    /// <summary>Set a numeric value (slider, spinner) natively via the RangeValue pattern, then read it back.</summary>
+    private static async Task<int> RunSetValueAsync(IAccessibilityBackend backend, string? app, string? find, string valueText)
+    {
+        if (string.IsNullOrEmpty(find))
+        {
+            Console.Error.WriteLine("--set-value needs --find <name> to pick the target element.");
+            return 2;
+        }
+        if (!double.TryParse(valueText, out var value))
+        {
+            Console.Error.WriteLine($"--set-value: \"{valueText}\" is not a number.");
+            return 2;
+        }
+        var matches = await backend.FindElementsAsync(new ElementQuery
+        {
+            ApplicationId = app, NameContains = find, Role = AccessibleRole.Slider, MaxResults = 5,
+        });
+        if (matches.Count == 0)
+            matches = await backend.FindElementsAsync(new ElementQuery
+            {
+                ApplicationId = app, NameContains = find, MaxResults = 5,
+            });
+        if (matches.Count == 0)
+        {
+            Console.Error.WriteLine($"No element matching \"{find}\".");
+            return 1;
+        }
+        var target = matches[0];
+        Console.WriteLine($"Target: [{target.Role}] {Quote(target.Name)} {Fmt(target.Bounds)}");
+        Console.WriteLine($"Setting value: {value} ...");
+        var r = await backend.SetValueAsync(target.Ref, value);
+        Console.WriteLine($"  → success={r.Success} path={r.Path} {r.Error}");
+        if (!r.Success) return 1;
+
+        var after = await backend.ReadElementAsync(target.Ref);
+        Console.WriteLine($"Read-back value: {after.Value?.ToString() ?? "(none)"}");
+        var ok = after.Value is not null && Math.Abs(after.Value.Value - value) < 0.5;
+        Console.WriteLine(ok ? "VERIFIED: the control now holds the value." : "WARNING: read-back did not match.");
+        return ok ? 0 : 1;
+    }
+
     private static async Task<int> RunActionsAsync(IAccessibilityBackend backend, string? app, string? click, string? type, string? keys)
     {
         if (click is not null)
@@ -186,9 +237,16 @@ internal static class Probe
             {
                 ApplicationId = app, Role = AccessibleRole.Button, NameContains = click, MaxResults = 1,
             });
+            // Not everything clickable is a Button (check boxes, menu items, list items…) —
+            // fall back to a name-only match and let the backend pick the right pattern.
+            if (matches.Count == 0)
+                matches = await backend.FindElementsAsync(new ElementQuery
+                {
+                    ApplicationId = app, NameContains = click, MaxResults = 1,
+                });
             if (matches.Count == 0)
             {
-                Console.Error.WriteLine($"No button matching \"{click}\".");
+                Console.Error.WriteLine($"Nothing matching \"{click}\" to click.");
                 return 1;
             }
             var target = matches[0];

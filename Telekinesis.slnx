@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/PongWars/PongWars.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Telekinesis.Abstractions/Telekinesis.Abstractions.csproj" />
     <Project Path="src/Telekinesis.Cli/Telekinesis.Cli.csproj" />

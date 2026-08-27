@@ -1,0 +1,59 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:PongWars"
+        x:Class="PongWars.MainWindow"
+        Title="Pong Wars — Telekinesis demo"
+        Width="1100" Height="720">
+  <DockPanel>
+    <Border DockPanel.Dock="Right" Width="280" Padding="16" Background="#181C22">
+      <StackPanel Spacing="14">
+        <TextBlock Text="Pong Wars" FontSize="24" FontWeight="Bold" Foreground="White"/>
+        <TextBlock Text="Every control here is a real accessible element — drive it by name."
+                   TextWrapping="Wrap" Foreground="#8892A0" FontSize="12"/>
+
+        <Border Background="#232A33" CornerRadius="8" Padding="12">
+          <StackPanel Spacing="6">
+            <TextBlock Name="DayScoreText" AutomationProperties.Name="Day score"
+                       Text="Day 288" FontSize="18" FontWeight="SemiBold" Foreground="#D9E8E3"/>
+            <TextBlock Name="NightScoreText" AutomationProperties.Name="Night score"
+                       Text="Night 288" FontSize="18" FontWeight="SemiBold" Foreground="#5AA9BC"/>
+          </StackPanel>
+        </Border>
+
+        <Button Name="PauseButton" AutomationProperties.Name="Pause game"
+                Content="Pause" HorizontalAlignment="Stretch" Click="OnPauseClick"/>
+        <Button Name="ResetButton" AutomationProperties.Name="Reset board"
+                Content="Reset board" HorizontalAlignment="Stretch" Click="OnResetClick"/>
+
+        <StackPanel Spacing="4">
+          <TextBlock Text="Day speed" Foreground="#AAB4C0" FontSize="12"/>
+          <Slider Name="DaySpeedSlider" AutomationProperties.Name="Day speed"
+                  Minimum="25" Maximum="300" Value="100" TickFrequency="5" IsSnapToTickEnabled="True"/>
+        </StackPanel>
+        <StackPanel Spacing="4">
+          <TextBlock Text="Night speed" Foreground="#AAB4C0" FontSize="12"/>
+          <Slider Name="NightSpeedSlider" AutomationProperties.Name="Night speed"
+                  Minimum="25" Maximum="300" Value="100" TickFrequency="5" IsSnapToTickEnabled="True"/>
+        </StackPanel>
+
+        <CheckBox Name="GridLinesCheck" AutomationProperties.Name="Show grid lines"
+                  Content="Show grid lines" Foreground="#AAB4C0"/>
+
+        <StackPanel Spacing="4">
+          <TextBlock Text="Balls per side" Foreground="#AAB4C0" FontSize="12"/>
+          <ComboBox Name="BallCountCombo" AutomationProperties.Name="Balls per side"
+                    SelectedIndex="0" HorizontalAlignment="Stretch">
+            <ComboBoxItem>1</ComboBoxItem>
+            <ComboBoxItem>2</ComboBoxItem>
+            <ComboBoxItem>3</ComboBoxItem>
+          </ComboBox>
+        </StackPanel>
+
+        <TextBlock Name="StatusText" AutomationProperties.Name="Game status"
+                   Text="Running" Foreground="#6BCB77" FontSize="12"/>
+      </StackPanel>
+    </Border>
+
+    <local:BoardControl Name="Board" AutomationProperties.Name="Pong Wars board"/>
+  </DockPanel>
+</Window>
