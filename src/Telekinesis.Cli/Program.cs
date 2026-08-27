@@ -9,6 +9,26 @@ using Telekinesis.Cli;
 // telekinesis setup      → print the platform setup steps (udev rule, TCC, ...) and exit
 // telekinesis probe ...  → exercise the backend from the terminal (VM validation)
 
+#if !WINDOWS
+// The dotnet-tool package can only target plain net10.0 (PackAsTool rejects the
+// -windows TFM), but the UIA backend needs the desktop framework. The tool build
+// therefore bundles the net10.0-windows publish under win/ and, on Windows,
+// re-execs it with stdio inherited — MCP-over-stdio passes straight through.
+if (OperatingSystem.IsWindows())
+{
+    var winPayload = Path.Combine(AppContext.BaseDirectory, "win", "Telekinesis.Cli.dll");
+    if (File.Exists(winPayload))
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("dotnet") {UseShellExecute = false};
+        psi.ArgumentList.Add(winPayload);
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        using var child = System.Diagnostics.Process.Start(psi)!;
+        await child.WaitForExitAsync();
+        return child.ExitCode;
+    }
+}
+#endif
+
 if (args.Contains("probe"))
     return await Probe.RunAsync(args);
 

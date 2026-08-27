@@ -9,6 +9,11 @@ at a fraction of the cost of screenshot-driven computer use.
 dotnet tool install -g Telekinesis
 ```
 
+No .NET on the machine? Grab a self-contained single-file build from the
+[releases page](https://github.com/egarim/telekinesis/releases) — Windows/Linux/macOS,
+x64 and arm64, no runtime required. (The dotnet-tool route does need the .NET 10
+runtime, plus the Windows Desktop runtime on Windows.)
+
 MCP client config:
 
 ```json
