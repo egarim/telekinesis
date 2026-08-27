@@ -7,10 +7,11 @@ see and control the desktop through the platform accessibility APIs — the same
 screen readers use. Semantic perception ("the Save button") instead of pixel-guessing,
 at a fraction of the cost of screenshot-driven computer use.
 
-**Watch it work** (YouTube Shorts):
-[the helpful ghost](https://youtube.com/shorts/Tv_lZBmAVGI) ·
-[three apps, zero screenshots](https://youtube.com/shorts/-a5_3NY6MuI) ·
-[the principle: the accessibility tree](https://youtube.com/shorts/fsNQ3THudmk)
+**Watch it work** (YouTube Shorts — click to play):
+
+| [![The helpful ghost](https://img.youtube.com/vi/Tv_lZBmAVGI/maxresdefault.jpg)](https://youtube.com/shorts/Tv_lZBmAVGI) | [![Three apps, zero screenshots](https://img.youtube.com/vi/-a5_3NY6MuI/maxresdefault.jpg)](https://youtube.com/shorts/-a5_3NY6MuI) | [![The principle: the accessibility tree](https://img.youtube.com/vi/fsNQ3THudmk/maxresdefault.jpg)](https://youtube.com/shorts/fsNQ3THudmk) |
+|:---:|:---:|:---:|
+| [The helpful ghost](https://youtube.com/shorts/Tv_lZBmAVGI) | [Three apps, zero screenshots](https://youtube.com/shorts/-a5_3NY6MuI) | [The principle](https://youtube.com/shorts/fsNQ3THudmk) |
 
 ```
 dotnet tool install -g Telekinesis
