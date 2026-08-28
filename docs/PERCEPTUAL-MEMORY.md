@@ -62,6 +62,22 @@ Training itself is future work; this store guarantees the data exists.
 - Eviction: 3 failed recalls (corrupted crop) removed the anchor and its file.
 - Export: valid dataset.jsonl + crops.
 
+## The tiers teach each other (v0.5.1+)
+
+- **`recall_targets(show: true)`** draws the re-located anchors as X-ray overlay
+  boxes (caption + match score) on the real desktop — the human sees what memory
+  believes before the agent clicks it. Terminal: `probe --recall --app pid:N --show`.
+- **`TELEKINESIS_LEARN=1`**: every successful element-targeted accessibility action
+  (`invoke`, `click`, `set_text` — MCP tools and probe alike) also records a
+  perceptual anchor for its element. The reliable tier trains the fallback tier as
+  a side effect of normal work, and the exported dataset grows from a11y-verified
+  labels. Opt-in because it costs a region capture per action.
+- Learning refuses covered elements (a hit-test at the element's center must land
+  in its own application) so the crop is the element's own pixels — with one
+  documented caveat: transparent overlay windows can make the hit-test and the
+  visible pixels disagree, in which case a bad crop is still possible. Recall
+  scores remain confidence, not proof.
+
 ## Known limitations
 
 - **Self-similar UIs can alias.** After a window move, a crop of one of two

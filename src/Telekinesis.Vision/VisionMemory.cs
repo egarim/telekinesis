@@ -98,6 +98,18 @@ public sealed class VisionMemory
     public Anchor? RecordAnchor(string appKey, Bounds windowRect, VisionElement element,
         ScreenImage source, (int X, int Y) imageOrigin)
     {
+        // Don't hoard duplicates: the same control re-learned on every use would
+        // bloat the store and the exported dataset. Same app + caption + roughly
+        // the same window-relative spot = the anchor we already have.
+        var cx = (element.Bounds.X + element.Bounds.Width / 2.0 - windowRect.X) / windowRect.Width;
+        var cy = (element.Bounds.Y + element.Bounds.Height / 2.0 - windowRect.Y) / windowRect.Height;
+        lock (_gate)
+        {
+            var existing = _anchors.FirstOrDefault(a => a.AppKey == appKey && a.Caption == element.Content
+                && Math.Abs(a.NormCx - cx) < 0.03 && Math.Abs(a.NormCy - cy) < 0.03);
+            if (existing is not null) return existing;
+        }
+
         var id = Guid.NewGuid().ToString("n")[..12];
         var cropRegion = new Bounds(
             element.Bounds.X - imageOrigin.X, element.Bounds.Y - imageOrigin.Y,

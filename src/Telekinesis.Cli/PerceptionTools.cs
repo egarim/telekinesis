@@ -179,11 +179,12 @@ public static class PerceptionTools
     }
 
     [McpServerTool(Name = "recall_targets")]
-    [Description("Re-locate this application's remembered vision targets (elements successfully acted on before) on the live screen, without running the parser. Returns them with current pixel bounds ready for click_at. Cheap — try this before parse_screen.")]
+    [Description("Re-locate this application's remembered vision targets (elements successfully acted on before) on the live screen, without running the parser. Returns them with current pixel bounds ready for click_at. Cheap — try this before parse_screen. Pass show=true to draw them as X-ray boxes so the human sees what memory believes.")]
     public static async Task<string> RecallTargets(
         BackendProvider provider,
         VisionMemoryService memoryService,
         [Description("Application id (pid:N) whose remembered targets to recall.")] string applicationId,
+        [Description("Draw the recalled targets on the real screen as labeled boxes for a few seconds.")] bool show,
         CancellationToken ct)
     {
         var backend = await provider.GetConnectedAsync(ct);
@@ -195,7 +196,13 @@ public static class PerceptionTools
         var image = await capture.CaptureScreenAsync(null, ct);
         var (appKey, windowRect) = await ResolveAppAsync(backend, applicationId, null, image, ct);
         var targets = memory.Recall(appKey, windowRect, image, (0, 0));
-        return JsonSerializer.Serialize(new { app = appKey, targets }, Json);
+
+        if (show && targets.Count > 0 && backend is IVisualFeedbackBackend visual)
+            await visual.HighlightAsync(
+                targets.Select(t => new HighlightRegion(t.Bounds, $"{t.Caption} · {t.Score:0.00}")).ToList(),
+                TimeSpan.FromSeconds(5), ct);
+
+        return JsonSerializer.Serialize(new { app = appKey, targets, shown = show }, Json);
     }
 
     /// <summary>App identity (stable process name) and window rectangle for anchor normalization.</summary>
