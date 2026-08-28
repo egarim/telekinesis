@@ -31,6 +31,7 @@ internal static class Probe
         var setText = Opt("--set-text");
         var setValue = Opt("--set-value");
         var screenshot = Opt("--screenshot");
+        var overlay = args.Contains("--overlay");
         var parse = args.Contains("--parse");
         var clickAt = Opt("--click-at");
         var region = Opt("--region");
@@ -54,6 +55,9 @@ internal static class Probe
 
         try
         {
+            if (overlay)
+                return await RunOverlayAsync(backend, app, find,
+                    int.TryParse(Opt("--for"), out var forSecs) ? forSecs : null);
             if (screenshot is not null)
                 return await RunScreenshotAsync(backend, screenshot, region);
             if (parse)
@@ -267,6 +271,79 @@ internal static class Probe
         var rk = await backend.PressKeysAsync(keys!);
         Console.WriteLine($"  → success={rk.Success} path={rk.Path} {rk.Error}");
         return rk.Success ? 0 : 1;
+    }
+
+    // ---- X-ray overlay ----
+
+    /// <summary>
+    /// `probe --overlay --app pid:N [--find substr]` — draw live labeled boxes over an
+    /// app's elements on the real desktop, refreshed until Enter. The "what the AI sees" shot.
+    /// </summary>
+    private static async Task<int> RunOverlayAsync(IAccessibilityBackend backend, string? app, string? find, int? forSeconds)
+    {
+        if (backend is not IVisualFeedbackBackend visual)
+        {
+            Console.Error.WriteLine($"{backend.Name} does not support the X-ray overlay yet.");
+            return 1;
+        }
+        if (app is null)
+        {
+            Console.Error.WriteLine("--overlay needs --app <id> (run a bare probe to list applications).");
+            return 2;
+        }
+
+        // Interactive: refresh until Enter. Unattended (--for N, or no console at
+        // all): refresh for N seconds (default 30) — also handy for timed filming.
+        Task? stop = null;
+        if (forSeconds is null && !Console.IsInputRedirected)
+        {
+            Console.WriteLine("X-ray overlay on — press Enter to stop.");
+            stop = Task.Run(Console.In.ReadLine);
+        }
+        else
+        {
+            forSeconds ??= 30;
+            Console.WriteLine($"X-ray overlay on for {forSeconds}s.");
+        }
+        var deadline = DateTimeOffset.Now.AddSeconds(forSeconds ?? int.MaxValue);
+        var first = true;
+        while (stop is not null ? !stop.IsCompleted : DateTimeOffset.Now < deadline)
+        {
+            var elements = await backend.FindElementsAsync(new ElementQuery
+            {
+                ApplicationId = app,
+                NameContains = string.IsNullOrEmpty(find) ? null : find,
+                MaxResults = 60,
+            });
+            var targets = elements
+                .Where(e => e.Bounds is not null
+                            && (e.States & ElementState.Visible) != 0
+                            && e.Role is not (AccessibleRole.Window or AccessibleRole.Pane or AccessibleRole.Group))
+                .Take(40)
+                .ToList();
+
+            var regions = new List<HighlightRegion>(targets.Count);
+            for (var i = 0; i < targets.Count; i++)
+            {
+                var name = targets[i].Name ?? targets[i].Role.ToString();
+                regions.Add(new HighlightRegion(targets[i].Bounds!,
+                    $"{i + 1} {(name.Length > 20 ? name[..20] + "…" : name)}"));
+            }
+            // Persist until replaced by the next refresh (or cleared on exit).
+            await visual.HighlightAsync(regions, TimeSpan.Zero);
+
+            if (first)
+            {
+                first = false;
+                Console.WriteLine($"{targets.Count} element(s) overlaid:");
+                for (var i = 0; i < targets.Count; i++)
+                    Console.WriteLine($"  {i + 1,3}  [{targets[i].Role}] {Quote(targets[i].Name)}  {Fmt(targets[i].Bounds)}");
+            }
+            await Task.Delay(1000);
+        }
+        await visual.ClearHighlightsAsync();
+        Console.WriteLine("Overlay cleared.");
+        return 0;
     }
 
     // ---- Vision tier ----

@@ -17,7 +17,7 @@ namespace Telekinesis.Windows;
 /// re-validates them on every use, throwing <see cref="StaleElementException"/>
 /// when the underlying element is gone — same discipline as the Linux backend.
 /// </summary>
-public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, IPointerInjectionBackend
+public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, IPointerInjectionBackend, IVisualFeedbackBackend
 {
     private const int MaxChildScan = 256;    // per-node child walk cap (huge lists, virtualized grids)
     private const int MaxTextLength = 16384; // TextPattern read cap
@@ -25,6 +25,12 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
     private readonly ConcurrentDictionary<string, AutomationElement> _registry = new();
     private int _nextId;
     private readonly SendInputInjector _injector = new();
+    private readonly Lazy<OverlayService> _overlay = new(() => new OverlayService());
+
+    /// <summary>With TELEKINESIS_SHOW_INTENT=1, injected actions flash their target
+    /// on screen for a beat before the input lands — the agent telegraphs its moves.</summary>
+    private static bool ShowIntent =>
+        Environment.GetEnvironmentVariable("TELEKINESIS_SHOW_INTENT") is "1" or "true";
 
     // Event tracking — mirrors the Linux backend's waiter/TCS design.
     private readonly SemaphoreSlim _eventGate = new(1, 1);
@@ -343,6 +349,7 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
             return ActionResult.Failed(ActionPath.InputInjection, "Element has no on-screen bounds to click.");
         try
         {
+            FlashIntent(bounds, "type here");
             _injector.MoveTo(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
             _injector.Click(PointerButton.Left);
             Thread.Sleep(100); // let focus settle before typing
@@ -384,6 +391,7 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
             return ActionResult.Failed(ActionPath.InputInjection, "Element has no on-screen bounds to click.");
         try
         {
+            FlashIntent(bounds, "click");
             _injector.MoveTo(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
             _injector.Click(button);
             return ActionResult.Injected();
@@ -433,6 +441,29 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         }
     }, ct);
 
+    // ---- X-ray overlay (IVisualFeedbackBackend) ----
+
+    public Task HighlightAsync(IReadOnlyList<HighlightRegion> regions, TimeSpan duration, CancellationToken ct = default)
+    {
+        _overlay.Value.Show(regions, duration);
+        return Task.CompletedTask;
+    }
+
+    public Task ClearHighlightsAsync(CancellationToken ct = default)
+    {
+        if (_overlay.IsValueCreated) _overlay.Value.Clear();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Show-intent beat before an injected action: flash the target, give the
+    /// viewer a moment to see it, then let the input land while the box is still up.</summary>
+    private void FlashIntent(Bounds b, string label)
+    {
+        if (!ShowIntent) return;
+        _overlay.Value.Show([new HighlightRegion(b, label)], TimeSpan.FromMilliseconds(900));
+        Thread.Sleep(450);
+    }
+
     // ---- Vision tier (IScreenCaptureBackend / IPointerInjectionBackend) ----
 
     public Task<ScreenImage> CaptureScreenAsync(Bounds? region = null, CancellationToken ct = default) => Task.Run(() =>
@@ -446,8 +477,25 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         // (the process is per-monitor-v2 DPI aware from ConnectAsync).
         using var bmp = new System.Drawing.Bitmap(b.Width, b.Height,
             System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        // Raw BitBlt with CAPTUREBLT: layered windows (tooltips, our own X-ray
+        // overlay) are invisible to a plain SourceCopy, and Graphics.CopyFromScreen
+        // rejects the SourceCopy|CaptureBlt combination as an undefined enum value.
         using (var g = System.Drawing.Graphics.FromImage(bmp))
-            g.CopyFromScreen(b.X, b.Y, 0, 0, new System.Drawing.Size(b.Width, b.Height));
+        {
+            var dest = g.GetHdc();
+            var src = GetDC(0);
+            try
+            {
+                const uint SrcCopyCaptureBlt = 0x00CC0020 | 0x40000000;
+                if (!BitBlt(dest, 0, 0, b.Width, b.Height, src, b.X, b.Y, SrcCopyCaptureBlt))
+                    throw new InvalidOperationException("BitBlt screen capture failed.");
+            }
+            finally
+            {
+                ReleaseDC(0, src);
+                g.ReleaseHdc(dest);
+            }
+        }
         using var ms = new MemoryStream();
         bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
         return new ScreenImage(ms.ToArray(), b.Width, b.Height);
@@ -461,6 +509,7 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
                 $"({x},{y}) is outside the virtual desktop {vs.Width}x{vs.Height} at ({vs.X},{vs.Y}).");
         try
         {
+            FlashIntent(new Bounds(x - 12, y - 12, 24, 24), "click");
             _injector.MoveTo(x, y);
             _injector.Click(button);
             return ActionResult.Injected();
@@ -478,6 +527,7 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
             try { Automation.RemoveAutomationFocusChangedEventHandler(_focusHandler); } catch { }
             _focusHandler = null;
         }
+        if (_overlay.IsValueCreated) _overlay.Value.Dispose();
         _registry.Clear();
         _eventGate.Dispose();
         return ValueTask.CompletedTask;
@@ -656,8 +706,11 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
             double.IsInfinity(r.Width) || double.IsInfinity(r.Height))
             return null;
         int x = (int)r.X, y = (int)r.Y, w = (int)r.Width, h = (int)r.Height;
-        const int Max = 100_000;
-        if (w <= 0 || h <= 0 || w > Max || h > Max || x < -Max || x > Max || y < -Max || y > Max)
+        // Windows parks minimized windows at (-32000,-32000); that's "not on
+        // screen", not a clickable location.
+        const int Max = 100_000, MinimizedSentinel = -30_000;
+        if (w <= 0 || h <= 0 || w > Max || h > Max || x < -Max || x > Max || y < -Max || y > Max
+            || x <= MinimizedSentinel || y <= MinimizedSentinel)
             return null;
         return new Bounds(x, y, w, h);
     }
@@ -765,4 +818,14 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
 
     [DllImport("user32.dll")]
     private static extern bool SetProcessDpiAwarenessContext(nint value);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetDC(nint hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern int ReleaseDC(nint hwnd, nint hdc);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool BitBlt(nint hdcDest, int xDest, int yDest, int width, int height,
+        nint hdcSrc, int xSrc, int ySrc, uint rop);
 }
