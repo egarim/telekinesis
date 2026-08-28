@@ -1,13 +1,13 @@
-# Telekinesis
+﻿# Telekinesis
 
 <img src="docs/media/telekinesis-mascot-512.png" alt="The Telekinesis ghost" width="160" align="right"/>
 
 **Move things without touching them.** Telekinesis is an MCP server that lets AI agents
-see and control the desktop through the platform accessibility APIs — the same channel
+see and control the desktop through the platform accessibility APIs â€” the same channel
 screen readers use. Semantic perception ("the Save button") instead of pixel-guessing,
 at a fraction of the cost of screenshot-driven computer use.
 
-**Watch it work** (YouTube Shorts — click to play):
+**Watch it work** (YouTube Shorts â€” click to play):
 
 | [![The helpful ghost](https://img.youtube.com/vi/Tv_lZBmAVGI/maxresdefault.jpg)](https://youtube.com/shorts/Tv_lZBmAVGI) | [![Three apps, zero screenshots](https://img.youtube.com/vi/-a5_3NY6MuI/maxresdefault.jpg)](https://youtube.com/shorts/-a5_3NY6MuI) | [![The principle: the accessibility tree](https://img.youtube.com/vi/fsNQ3THudmk/maxresdefault.jpg)](https://youtube.com/shorts/fsNQ3THudmk) | [![Install it in 2 minutes](https://img.youtube.com/vi/BxQB6I0dPco/maxresdefault.jpg)](https://youtube.com/shorts/BxQB6I0dPco) |
 |:---:|:---:|:---:|:---:|
@@ -18,7 +18,7 @@ dotnet tool install -g Telekinesis
 ```
 
 No .NET on the machine? Grab a self-contained single-file build from the
-[releases page](https://github.com/egarim/telekinesis/releases) — Windows/Linux/macOS,
+[releases page](https://github.com/egarim/telekinesis/releases) â€” Windows/Linux/macOS,
 x64 and arm64, no runtime required. (The dotnet-tool route does need the .NET 10
 runtime, plus the Windows Desktop runtime on Windows.)
 
@@ -30,28 +30,28 @@ MCP client config:
 
 ## Modes
 
-- **Clairvoyant mode** (`telekinesis --read-only`) — perception only: `list_applications`,
+- **Clairvoyant mode** (`telekinesis --read-only`) â€” perception only: `list_applications`,
   `get_tree`, `find_elements`, `read_element`, `get_focused`. Safe to expose; needs no
   input permissions. Password-field content is never exposed.
-- **Telekinesis mode** (default) — adds actions: `invoke`, `set_text`, `click`,
+- **Telekinesis mode** (default) â€” adds actions: `invoke`, `set_text`, `click`,
   `type_text`, `press_keys`, `click_at`. Each action tries the native accessibility
   action first and falls back to OS input injection, reporting which path ran. Every
   action is audit-logged.
-- **Vision tier** (last resort) — for the moments when the accessibility tree fails:
+- **Vision tier** (last resort) â€” for the moments when the accessibility tree fails:
   `screenshot` captures pixels, `parse_screen` turns them into clickable elements via
   an optional [OmniParser](https://github.com/microsoft/OmniParser) sidecar, and
   `click_at` acts on them. Screens seen before answer instantly from
   [perceptual memory](docs/PERCEPTUAL-MEMORY.md), which also learns the targets that
   worked (`recall_targets`) and exports them as a training-ready dataset. See
   [docs/VISION.md](docs/VISION.md).
-- **X-ray overlay** — see what the AI sees, on the real desktop: `highlight` boxes an
+- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
   element, `probe --overlay` draws live labeled boxes over a whole app, and
   `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
   input lands. Click-through, never steals focus. See [docs/XRAY-OVERLAY.md](docs/XRAY-OVERLAY.md).
 
 [![X-ray overlay demo](docs/media/xray-overlay-demo.png)](docs/media/xray-overlay-demo.mp4)
 
-*The X-ray overlay over Calculator — every element the ghost can see, boxed and labeled
+*The X-ray overlay over Calculator â€” every element the ghost can see, boxed and labeled
 live; then it computes 7+7 with each click telegraphed
 ([video](docs/media/xray-overlay-demo.mp4)).*
 
@@ -59,9 +59,9 @@ live; then it computes 7+7 with each click telegraphed
 
 | OS | Perception | Actions | Status |
 |---|---|---|---|
-| Linux | AT-SPI over D-Bus (Tmds.DBus.Protocol) — list, tree, find, states, bounds, text | AT-SPI Action/EditableText/Value → uinput fallback | perception + actions done; focus/events next |
-| Windows | UI Automation (managed UIA client) — list, tree, find, states, bounds, text | UIA Invoke/Value/Toggle/RangeValue → SendInput fallback | perception + actions + events validated live ([notes](docs/RUNNING-ON-WINDOWS.md)) |
-| macOS | AXAPI | AXPress → CGEvent | planned |
+| Linux | AT-SPI over D-Bus (Tmds.DBus.Protocol) â€” list, tree, find, states, bounds, text | AT-SPI Action/EditableText/Value â†’ uinput fallback | perception + actions done; focus/events next |
+| Windows | UI Automation (managed UIA client) â€” list, tree, find, states, bounds, text | UIA Invoke/Value/Toggle/RangeValue â†’ SendInput fallback | perception + actions + events validated live ([notes](docs/RUNNING-ON-WINDOWS.md)) |
+| macOS | AXAPI | AXPress â†’ CGEvent | planned |
 
 > Actions are implemented against the spec but await runtime testing on a Linux
 > desktop session with `/dev/uinput` access.
@@ -74,7 +74,7 @@ Uno Platform apps on Linux become visible to Telekinesis via
 [uno-atspi-bridge](https://github.com/egarim/uno-atspi-bridge), which publishes Uno's
 `AutomationPeer` tree onto the accessibility bus.
 
-## Samples — real apps, driven live
+## Samples â€” real apps, driven live
 
 Three Avalonia stress-test apps live in [`samples/`](samples/), each with a recorded
 session of Telekinesis driving it (all native patterns, verified by read-back):
@@ -82,7 +82,7 @@ session of Telekinesis driving it (all native patterns, verified by read-back):
 | | | |
 |:---:|:---:|:---:|
 | [![Pong Wars](docs/media/pongwars-demo.png)](samples/PongWars) | [![Whack-a-Mole](docs/media/whackamole-demo.png)](samples/WhackAMole) | [![Form Gauntlet](docs/media/formgauntlet-demo.png)](samples/FormGauntlet) |
-| [**PongWars**](samples/PongWars) — drive the controls around an a11y-opaque canvas | [**WhackAMole**](samples/WhackAMole) — reaction benchmark: 46/0 hits, avg **110 ms**, best **27 ms** | [**FormGauntlet**](samples/FormGauntlet) — fill → rejected → read the errors → accepted |
+| [**PongWars**](samples/PongWars) â€” drive the controls around an a11y-opaque canvas | [**WhackAMole**](samples/WhackAMole) â€” reaction benchmark: 46/0 hits, avg **110 ms**, best **27 ms** | [**FormGauntlet**](samples/FormGauntlet) â€” fill â†’ rejected â†’ read the errors â†’ accepted |
 
 ## Setup
 
@@ -92,7 +92,7 @@ Accessibility permission).
 
 ## License
 
-**Dual-licensed.** Use it under [AGPL-3.0](LICENSE) for free — including commercially —
+**Dual-licensed.** Use it under [AGPL-3.0](LICENSE) for free â€” including commercially â€”
 as long as you share source per the AGPL. Embedding it in a proprietary product or
 closed service instead? Get a [commercial license](COMMERCIAL.md):
 joche.ojeda@bitframeworks.com. (0.1.0 remains MIT; 0.2.0 remains FSL-1.1-MIT.)
@@ -100,5 +100,6 @@ joche.ojeda@bitframeworks.com. (0.1.0 remains MIT; 0.2.0 remains FSL-1.1-MIT.)
 ## Security
 
 This is total-machine-control tooling. Run it only for agents you trust, prefer
-`--read-only` when actions aren't needed, and never expose the server on an open port —
+`--read-only` when actions aren't needed, and never expose the server on an open port â€”
 keep it on stdio or behind authenticated tunnels.
+

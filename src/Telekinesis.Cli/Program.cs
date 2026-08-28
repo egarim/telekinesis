@@ -36,6 +36,66 @@ if (args.Contains("probe"))
 if (args.Contains("repl"))
     return await Repl.RunAsync(args);
 
+// telekinesis run <scenario.json> [--enable-actions] → scripted demo with captions, 0/1 exit
+if (args.FirstOrDefault() == "run")
+    return await ScenarioRunner.RunAsync(args.Skip(1).ToArray());
+
+// telekinesis assert --role Button --name Save [--app id] [--must-be visible] [--timeout-ms 5000]
+// CI contract: exit 0 when the condition holds within the timeout, 1 otherwise.
+if (args.FirstOrDefault() == "assert")
+{
+    string? Opt(string name)
+    {
+        var i = Array.IndexOf(args, name);
+        return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+    }
+    await using var assertProvider = new BackendProvider();
+    try
+    {
+        var backend = await assertProvider.GetConnectedAsync();
+        var result = await Telekinesis.Cli.AssertTools.RunAsync(
+            backend, Opt("--role"), Opt("--name"), Opt("--app"), Opt("--must-be"),
+            int.TryParse(Opt("--timeout-ms"), out var t) ? t : 3000);
+        Console.WriteLine(result.Ok
+            ? $"ok: [{result.Matched!.Role}] \"{result.Matched.Name}\" after {result.WaitedMs} ms"
+            : $"FAILED: no match within {result.WaitedMs} ms");
+        return result.Ok ? 0 : 1;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"assert failed: {ex.Message}");
+        return 1;
+    }
+}
+
+// telekinesis serve --sse [--port N] [--enable-actions] → HTTP/SSE transport.
+// Remote posture is read-only by default: action tools require the explicit flag.
+// Binds localhost only — deploy behind an authenticated tunnel (docs/REMOTE.md).
+if (args.FirstOrDefault() == "serve")
+{
+    var portIdx = Array.IndexOf(args, "--port");
+    var port = portIdx >= 0 && portIdx + 1 < args.Length && int.TryParse(args[portIdx + 1], out var p) ? p : 3001;
+    var enableActions = args.Contains("--enable-actions");
+
+    var web = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
+    web.Logging.ClearProviders();
+    web.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+    web.Services.AddSingleton<BackendProvider>();
+    web.Services.AddSingleton<VisionMemoryService>();
+    var sse = web.Services.AddMcpServer().WithHttpTransport()
+        .WithTools([typeof(PerceptionTools), typeof(AssertTools)]);
+    if (enableActions)
+        sse.WithTools([typeof(ActionTools), typeof(CredentialTools)]);
+
+    var app = web.Build();
+    Microsoft.AspNetCore.Builder.McpEndpointRouteBuilderExtensions.MapMcp(app);
+    Console.Error.WriteLine($"[telekinesis] serving MCP over HTTP on http://127.0.0.1:{port} "
+        + (enableActions ? "(actions ENABLED)" : "(read-only — start with --enable-actions to allow actions)"));
+    Console.Error.WriteLine($"[telekinesis] audit log: {Telekinesis.Cli.AuditLog.Path}");
+    await app.RunAsync($"http://127.0.0.1:{port}");
+    return 0;
+}
+
 if (args.Contains("doctor"))
 {
     await using var provider = new BackendProvider();
@@ -136,10 +196,10 @@ builder.Services.AddSingleton<VisionMemoryService>();
 var mcp = builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithTools([typeof(PerceptionTools)]);
+    .WithTools([typeof(PerceptionTools), typeof(AssertTools)]);
 
 if (!readOnly)
-    mcp.WithTools([typeof(ActionTools)]);
+    mcp.WithTools([typeof(ActionTools), typeof(CredentialTools)]);
 
 await builder.Build().RunAsync();
 return 0;

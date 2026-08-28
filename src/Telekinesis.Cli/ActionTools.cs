@@ -112,9 +112,10 @@ public static class ActionTools
 
     private static string Audit(string tool, string target, ActionResult result)
     {
-        // Audit log: every action lands on stderr (visible in MCP client logs)
-        // regardless of outcome. TODO: also append to a file under XDG_STATE_HOME.
+        // Audit trail: every action lands on stderr (visible in MCP client logs)
+        // AND in the state-dir audit file, regardless of outcome.
         Console.Error.WriteLine($"[telekinesis] {DateTimeOffset.Now:O} {tool} target={target} success={result.Success} path={result.Path}");
+        AuditLog.Append(tool, target, result.Success, result.Path.ToString());
         return JsonSerializer.Serialize(result, PerceptionTools.Json);
     }
 }
