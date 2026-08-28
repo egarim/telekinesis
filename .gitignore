@@ -8,3 +8,6 @@ flick-output/remotion/node_modules/
 flick-output/remotion/out/
 flick-output/scenes/
 artifacts/
+scripts/telekinesis.exe
+scripts/sandbox-validate-report.txt
+scripts/minimize-region.png
