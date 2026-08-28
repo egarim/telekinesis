@@ -1,0 +1,17 @@
+<Configuration>
+  <!-- Windows Sandbox config for the issue #7 single-monitor validation pass.
+       1. Put telekinesis.exe (self-contained win build) into this scripts/ folder.
+       2. Double-click this file (needs the Windows Sandbox optional feature).
+       3. The pass runs automatically; results land in scripts/sandbox-validate-report.txt
+          on the HOST (the folder is mapped read-write). -->
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\joche\source\repos\telekinesis\scripts</HostFolder>
+      <SandboxFolder>C:\validate</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell -ExecutionPolicy Bypass -File C:\validate\sandbox-validate.ps1</Command>
+  </LogonCommand>
+</Configuration>
