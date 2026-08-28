@@ -1,0 +1,35 @@
+{
+  "name": "calc-add",
+  "narration": "An agent computes 7+7 on the real Windows Calculator — by button name, through UI Automation, native invoke only.",
+  "notes": "VALIDATED on Windows 11 (UIA backend). Open Calculator first. Uses native InvokePattern throughout (path=NativeAction); needs no coordinates and survives the window being moved anywhere.",
+  "steps": [
+    { "say": "Checking Calculator is on screen",
+      "tool": "assert_element",
+      "args": { "nameContains": "Display is", "mustBe": "visible", "timeoutMs": 5000 } },
+
+    { "say": "Pressing Seven — native accessibility action, no pixels",
+      "tool": "invoke",
+      "pre": [ { "tool": "find_elements", "args": { "role": "Button", "nameContains": "Seven" }, "bind": "seven" } ],
+      "args": { "elementId": "{{seven.Ref.Id}}", "applicationId": "{{seven.Ref.ApplicationId}}" } },
+
+    { "say": "Pressing Plus",
+      "tool": "invoke",
+      "pre": [ { "tool": "find_elements", "args": { "role": "Button", "nameContains": "Plus" }, "bind": "plus" } ],
+      "args": { "elementId": "{{plus.Ref.Id}}", "applicationId": "{{plus.Ref.ApplicationId}}" } },
+
+    { "say": "Pressing Seven again — the bound handle is still live",
+      "tool": "invoke",
+      "args": { "elementId": "{{seven.Ref.Id}}", "applicationId": "{{seven.Ref.ApplicationId}}" } },
+
+    { "say": "Pressing Equals",
+      "tool": "invoke",
+      "pre": [ { "tool": "find_elements", "args": { "role": "Button", "nameContains": "Equals" }, "bind": "equals" } ],
+      "args": { "elementId": "{{equals.Ref.Id}}", "applicationId": "{{equals.Ref.ApplicationId}}" } },
+
+    { "say": "Verifying by reading the display back through the tree",
+      "tool": "find_elements",
+      "args": { "nameContains": "Display is" },
+      "bind": "display",
+      "assert": "display.Name contains '14'" }
+  ]
+}
