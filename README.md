@@ -84,6 +84,16 @@ session of Telekinesis driving it (all native patterns, verified by read-back):
 | [![Pong Wars](docs/media/pongwars-demo.png)](samples/PongWars) | [![Whack-a-Mole](docs/media/whackamole-demo.png)](samples/WhackAMole) | [![Form Gauntlet](docs/media/formgauntlet-demo.png)](samples/FormGauntlet) |
 | [**PongWars**](samples/PongWars) â€” drive the controls around an a11y-opaque canvas | [**WhackAMole**](samples/WhackAMole) â€” reaction benchmark: 46/0 hits, avg **110 ms**, best **27 ms** | [**FormGauntlet**](samples/FormGauntlet) â€” fill â†’ rejected â†’ read the errors â†’ accepted |
 
+## Scripted demos, CI, and remote use
+
+`telekinesis run demos/<scenario>.json --enable-actions` executes a self-verifying
+scripted demo with caption output (see [demos/](demos/)); `telekinesis assert` gives
+shell scripts a 0/1 exit probe for UI conditions. For remote clients,
+`telekinesis serve --sse` speaks MCP over HTTP on localhost — read-only unless started
+with `--enable-actions`, with every action audit-logged to a file. Deployment posture
+and the credential-handoff rule (`fill_credential` — secrets never pass through the
+model) are in [docs/REMOTE.md](docs/REMOTE.md).
+
 ## Setup
 
 Run `telekinesis doctor` to diagnose your environment and `telekinesis setup` for the
