@@ -86,6 +86,41 @@ public static class PerceptionTools
         return evt is null ? "null" : JsonSerializer.Serialize(evt, Json);
     }
 
+    [McpServerTool(Name = "highlight")]
+    [Description("Draw a labeled box on the real screen over an element or region — show the human what you're looking at or about to act on. Draws only, never takes focus or input; safe in read-only mode.")]
+    public static async Task<string> Highlight(
+        BackendProvider provider,
+        [Description("Element id to highlight; empty when using region.")] string? elementId,
+        [Description("Owning application id (required with elementId).")] string? applicationId,
+        [Description("Raw region 'x,y,width,height' in screen pixels, when no element id.")] string? region,
+        [Description("Short label to show above the box.")] string? label,
+        [Description("Display time in ms (default 1500).")] int durationMs,
+        CancellationToken ct)
+    {
+        var backend = await provider.GetConnectedAsync(ct);
+        if (backend is not IVisualFeedbackBackend visual)
+            throw new NotSupportedException($"{backend.Name} does not support on-screen highlighting yet.");
+
+        Bounds bounds;
+        if (!string.IsNullOrEmpty(elementId))
+        {
+            var element = await backend.ReadElementAsync(
+                new ElementRef(elementId, applicationId ?? ""), ct);
+            bounds = element.Bounds ?? throw new InvalidOperationException(
+                "Element has no on-screen bounds to highlight.");
+            label ??= element.Name;
+        }
+        else
+        {
+            bounds = ParseRegion(region) ?? throw new ArgumentException(
+                "Provide either elementId or region.");
+        }
+
+        await visual.HighlightAsync([new HighlightRegion(bounds, label)],
+            TimeSpan.FromMilliseconds(durationMs <= 0 ? 1500 : durationMs), ct);
+        return JsonSerializer.Serialize(new { highlighted = bounds, label }, Json);
+    }
+
     // ---- Vision tier: for the moments when the accessibility tree fails ----
 
     [McpServerTool(Name = "screenshot")]
