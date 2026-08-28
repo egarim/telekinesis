@@ -40,7 +40,20 @@ MCP client config:
 - **Vision tier** (last resort) — for the moments when the accessibility tree fails:
   `screenshot` captures pixels, `parse_screen` turns them into clickable elements via
   an optional [OmniParser](https://github.com/microsoft/OmniParser) sidecar, and
-  `click_at` acts on them. See [docs/VISION.md](docs/VISION.md).
+  `click_at` acts on them. Screens seen before answer instantly from
+  [perceptual memory](docs/PERCEPTUAL-MEMORY.md), which also learns the targets that
+  worked (`recall_targets`) and exports them as a training-ready dataset. See
+  [docs/VISION.md](docs/VISION.md).
+- **X-ray overlay** — see what the AI sees, on the real desktop: `highlight` boxes an
+  element, `probe --overlay` draws live labeled boxes over a whole app, and
+  `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
+  input lands. Click-through, never steals focus. See [docs/XRAY-OVERLAY.md](docs/XRAY-OVERLAY.md).
+
+[![X-ray overlay demo](docs/media/xray-overlay-demo.png)](docs/media/xray-overlay-demo.mp4)
+
+*The X-ray overlay over Calculator — every element the ghost can see, boxed and labeled
+live; then it computes 7+7 with each click telegraphed
+([video](docs/media/xray-overlay-demo.mp4)).*
 
 ## Platform backends
 
