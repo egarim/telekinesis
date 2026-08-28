@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <!-- Per-monitor-v2 DPI awareness from process start. This applies to the
+       self-contained single-file build (the apphost embeds this manifest); the
+       framework-dependent `dotnet tool` path runs under the dotnet host and
+       relies on the programmatic SetProcessDpiAwarenessContext in the UIA
+       backend instead. Without per-monitor awareness, element bounds on scaled
+       secondary monitors drift from physical pixels (issue #7). -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+    </windowsSettings>
+  </application>
+</assembly>

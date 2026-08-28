@@ -6,6 +6,8 @@
          plain net10.0 everywhere, net10.0-windows adds Telekinesis.Windows. -->
     <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- Win32 manifest (per-monitor-v2 DPI) only makes sense for the Windows head. -->
+    <ApplicationManifest Condition="$(TargetFramework.Contains('-windows'))">app.manifest</ApplicationManifest>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Telekinesis.Cli</RootNamespace>

@@ -32,6 +32,11 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
     private AutomationFocusChangedEventHandler? _focusHandler;
     private bool _eventsReady;
 
+    // DPI awareness that actually took effect after ConnectAsync (0=unaware,
+    // 1=system, 2=per-monitor). Only per-monitor keeps element bounds aligned with
+    // physical pixels across mixed-scale monitors. -1 = not yet connected.
+    private int _dpiAwareness = -1;
+
     public string Name => "UI Automation (Windows)";
 
     public Task ConnectAsync(CancellationToken ct = default)
@@ -41,11 +46,15 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
 
         return Task.Run(() =>
         {
-            // Without per-monitor DPI awareness the console process gets virtualized
-            // coordinates while SendInput uses physical ones — clicks land off-target
-            // on scaled displays. Must be set before any UIA/coordinate call; fails
-            // harmlessly if the process already has a DPI context.
-            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            // Without per-monitor DPI awareness the process gets virtualized
+            // coordinates while SendInput uses physical ones — element bounds on
+            // scaled secondary monitors drift from true pixels. We try to set it
+            // here, but the call FAILS if the process already has a DPI context
+            // (e.g. the `dotnet` host that runs the tool build declares one in its
+            // apphost manifest — you cannot change it once set). The self-contained
+            // single-file exe carries a PerMonitorV2 manifest so it starts correct.
+            // Either way we record what actually stuck, so `doctor` can warn.
+            EnsureDpiAwareness();
 
             _ = AutomationElement.RootElement
                 ?? throw new InvalidOperationException("UI Automation root element is not available.");
@@ -63,6 +72,7 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
             return new DiagnosticReport(false, items);
         }
         items.Add(new("platform", true, "Windows detected."));
+        EnsureDpiAwareness();
 
         try
         {
@@ -83,6 +93,17 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
             elevated ? null : "Run Telekinesis elevated if you need to automate elevated apps."));
 
         items.Add(new("input", true, "SendInput available; no special permission required on Windows."));
+
+        // Per-monitor-v2 is required for element bounds to match physical pixels on
+        // scaled secondary monitors. It's still "ok" on a single-monitor or uniform-
+        // scale setup (system-aware agrees there) — but warn so mixed-DPI users know.
+        var perMonitor = _dpiAwareness == 2;
+        items.Add(new("dpi-awareness", true,
+            perMonitor
+                ? "Per-monitor-v2 DPI awareness active; element bounds match physical pixels on all monitors."
+                : $"Process is {DpiAwarenessName(_dpiAwareness)} DPI-aware, not per-monitor. Fine on one monitor or uniform scaling; on a multi-monitor setup with mixed scale factors, element bounds on secondary monitors can drift from true pixels.",
+            perMonitor ? null
+                : "Run the self-contained single-file build (it ships a per-monitor-v2 manifest), or launch so the process starts per-monitor-v2 aware — the `dotnet` host fixes a DPI context before the tool can change it."));
 
         return new DiagnosticReport(items.All(i => i.Ok), items);
     }, ct);
@@ -382,9 +403,16 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         var bounds = ToBounds(TryGet(() => el.Current.BoundingRectangle));
         if (bounds is null || bounds.Width <= 0 || bounds.Height <= 0)
             return ActionResult.Failed(ActionPath.InputInjection, "Element has no on-screen bounds to click.");
+        var cx = bounds.X + bounds.Width / 2;
+        var cy = bounds.Y + bounds.Height / 2;
+        // The a11y tree lists occluded elements as Visible; injecting a click at a
+        // covered center would hit whatever is on top. Refuse rather than mis-click.
+        if (!PointHitsTargetWindow(el, cx, cy))
+            return ActionResult.Failed(ActionPath.InputInjection,
+                "Element is covered by another window at its click point; a pointer click would hit the wrong target. Bring it to the foreground, or use the native action (invoke/set_value) which does not depend on being on top.");
         try
         {
-            _injector.MoveTo(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
+            _injector.MoveTo(cx, cy);
             _injector.Click(button);
             return ActionResult.Injected();
         }
@@ -761,8 +789,73 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         catch { return false; }
     }
 
+    // ---- DPI awareness ----
+
     private static readonly nint DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
+
+    /// <summary>Try to become per-monitor-v2 aware and record what actually stuck.
+    /// Idempotent and safe to call more than once.</summary>
+    private void EnsureDpiAwareness()
+    {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        _dpiAwareness = CurrentDpiAwareness();
+    }
+
+    /// <summary>0=unaware, 1=system, 2=per-monitor, -1=unknown. Per-monitor-v1 and v2
+    /// both report as 2 here; either keeps bounds aligned across mixed-scale monitors.</summary>
+    private static int CurrentDpiAwareness()
+    {
+        try { return GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext()); }
+        catch { return -1; } // pre-1607 Windows without these APIs
+    }
+
+    private static string DpiAwarenessName(int a) => a switch
+    {
+        0 => "unaware", 1 => "system", 2 => "per-monitor", _ => "unknown"
+    };
 
     [DllImport("user32.dll")]
     private static extern bool SetProcessDpiAwarenessContext(nint value);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetThreadDpiAwarenessContext();
+
+    [DllImport("user32.dll")]
+    private static extern int GetAwarenessFromDpiAwarenessContext(nint value);
+
+    [DllImport("user32.dll")]
+    private static extern nint WindowFromPoint(POINT point);
+
+    private struct POINT { public int X, Y; }
+
+    /// <summary>True if a pointer click at (x,y) would land on the target element's own
+    /// top-level window, rather than something covering it. UIA reports occluded elements
+    /// as Visible with plausible bounds, so an injected click can hit whatever is on top;
+    /// this guards the injection fallback. Coarse (window-level) but fast and reliable.</summary>
+    private static bool PointHitsTargetWindow(AutomationElement el, int x, int y)
+    {
+        try
+        {
+            var hwndAtPoint = WindowFromPoint(new POINT { X = x, Y = y });
+            if (hwndAtPoint == 0) return false;
+            // Most UIA elements are windowless; walk up the control view until an
+            // ancestor exposes a real HWND, then compare root windows.
+            nint targetHwnd = 0;
+            var node = el;
+            while (node is not null && targetHwnd == 0)
+            {
+                var handle = node; // capture for the lambda
+                targetHwnd = new nint(TryGetStatic(() => handle.Current.NativeWindowHandle));
+                if (targetHwnd == 0) node = TryGet(() => TreeWalker.ControlViewWalker.GetParent(handle));
+            }
+            if (targetHwnd == 0) return true; // can't resolve a window; don't block
+            return GetAncestor(hwndAtPoint, GA_ROOT) == GetAncestor(targetHwnd, GA_ROOT);
+        }
+        catch { return true; } // never let the guard itself block a legitimate click
+    }
+
+    private const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll")]
+    private static extern nint GetAncestor(nint hwnd, uint flags);
 }

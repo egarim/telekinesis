@@ -73,8 +73,18 @@ Consequences:
   vision tier: `screenshot` the region, confirm the target pixels, `click_at` what
   you see (see `docs/VISION.md`).
 - Z-order is invisible to the a11y tree: an element reports `Visible` with plausible
-  bounds while another window covers it, and the click goes to whatever is on top.
-  A pixel check is the only reliable guard.
+  bounds while another window covers it. The pointer paths (`click`, and the injection
+  fallback under `invoke`) now **hit-test the click point** with `WindowFromPoint` and
+  refuse with "element is covered by another window" rather than clicking through to
+  whatever is on top. Native actions (`invoke`/`set_value`/`set_text`) don't depend on
+  being on top and are unaffected — prefer them.
+
+**Self-check.** `telekinesis doctor` now reports a `dpi-awareness` line: `per-monitor`
+means element bounds match physical pixels on every monitor; `system`/`unaware` means
+bounds on scaled secondary monitors may drift, and you should use the self-contained
+single-file build (it ships a per-monitor-v2 manifest) or escalate to the vision tier
+there. The programmatic switch usually succeeds under the `dotnet` host, but this tells
+you for certain on the machine in front of you.
 
 ## 7. Perception caps
 The control-view walk caps children at 256 per node and searches at 20 000 nodes, so
