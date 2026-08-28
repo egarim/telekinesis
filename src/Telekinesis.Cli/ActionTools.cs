@@ -17,13 +17,17 @@ public static class ActionTools
     [Description("Invoke an element's action. Default activates it (click a button, toggle a checkbox, select a list item). Pass action 'expand'/'collapse' to open or close a combo box or tree item.")]
     public static async Task<string> Invoke(
         BackendProvider provider,
+        VisionMemoryService memoryService,
         [Description("Element id from a previous query.")] string elementId,
         [Description("Owning application id.")] string applicationId,
         [Description("Optional specific action: invoke (default), expand, collapse, toggle, select.")] string? action,
         CancellationToken ct)
     {
         var backend = await provider.GetConnectedAsync(ct);
-        var result = await backend.InvokeAsync(new ElementRef(elementId, applicationId), action, ct);
+        var reference = new ElementRef(elementId, applicationId);
+        var result = await backend.InvokeAsync(reference, action, ct);
+        if (result.Success)
+            await memoryService.LearnFromElementAsync(backend, reference, ct);
         return Audit(string.IsNullOrEmpty(action) ? "invoke" : action, elementId, result);
     }
 
@@ -44,12 +48,16 @@ public static class ActionTools
     [Description("Replace the text content of an editable element.")]
     public static async Task<string> SetText(
         BackendProvider provider,
+        VisionMemoryService memoryService,
         string elementId, string applicationId,
         [Description("The full new text content.")] string text,
         CancellationToken ct)
     {
         var backend = await provider.GetConnectedAsync(ct);
-        var result = await backend.SetTextAsync(new ElementRef(elementId, applicationId), text, ct);
+        var reference = new ElementRef(elementId, applicationId);
+        var result = await backend.SetTextAsync(reference, text, ct);
+        if (result.Success)
+            await memoryService.LearnFromElementAsync(backend, reference, ct);
         return Audit("set_text", elementId, result);
     }
 
@@ -57,13 +65,17 @@ public static class ActionTools
     [Description("Pointer-click the center of an element via input injection. Use invoke first; click is the fallback for apps without native actions.")]
     public static async Task<string> Click(
         BackendProvider provider,
+        VisionMemoryService memoryService,
         string elementId, string applicationId,
         [Description("left, middle or right (default left).")] string? button,
         CancellationToken ct)
     {
         var backend = await provider.GetConnectedAsync(ct);
         var btn = Enum.TryParse<PointerButton>(button, ignoreCase: true, out var b) ? b : PointerButton.Left;
-        var result = await backend.ClickAsync(new ElementRef(elementId, applicationId), btn, ct);
+        var reference = new ElementRef(elementId, applicationId);
+        var result = await backend.ClickAsync(reference, btn, ct);
+        if (result.Success)
+            await memoryService.LearnFromElementAsync(backend, reference, ct);
         return Audit("click", elementId, result);
     }
 

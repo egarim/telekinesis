@@ -58,6 +58,8 @@ internal static class Probe
             if (overlay)
                 return await RunOverlayAsync(backend, app, find,
                     int.TryParse(Opt("--for"), out var forSecs) ? forSecs : null);
+            if (args.Contains("--recall"))
+                return await RunRecallAsync(provider, app, args.Contains("--show"));
             if (screenshot is not null)
                 return await RunScreenshotAsync(backend, screenshot, region);
             if (parse)
@@ -183,6 +185,7 @@ internal static class Probe
         var r = await backend.SetTextAsync(target.Ref, text);
         Console.WriteLine($"  → success={r.Success} path={r.Path} {r.Error}");
         if (!r.Success) return 1;
+        await new VisionMemoryService().LearnFromElementAsync(backend, target.Ref);
 
         // Read it back through AT-SPI to prove the text really landed in the app.
         var after = await backend.ReadElementAsync(target.Ref);
@@ -257,6 +260,8 @@ internal static class Probe
             Console.WriteLine($"Invoking [{target.Role}] {Quote(target.Name)} {Fmt(target.Bounds)} ...");
             var r = await backend.InvokeAsync(target.Ref);
             Console.WriteLine($"  → success={r.Success} path={r.Path} {r.Error}");
+            if (r.Success)
+                await new VisionMemoryService().LearnFromElementAsync(backend, target.Ref);
             return r.Success ? 0 : 1;
         }
         if (type is not null)
@@ -343,6 +348,37 @@ internal static class Probe
         }
         await visual.ClearHighlightsAsync();
         Console.WriteLine("Overlay cleared.");
+        return 0;
+    }
+
+    /// <summary>
+    /// `probe --recall --app pid:N [--show]` — re-locate the app's remembered
+    /// perceptual anchors on the live screen; --show draws them as X-ray boxes.
+    /// </summary>
+    private static async Task<int> RunRecallAsync(BackendProvider provider, string? app, bool show)
+    {
+        if (app is null)
+        {
+            Console.Error.WriteLine("--recall needs --app <id> (run a bare probe to list applications).");
+            return 2;
+        }
+        var memoryService = new VisionMemoryService();
+        var json = await PerceptionTools.RecallTargets(provider, memoryService, app, show, default);
+        var doc = System.Text.Json.JsonDocument.Parse(json);
+        var targets = doc.RootElement.GetProperty("targets");
+        Console.WriteLine($"{targets.GetArrayLength()} remembered target(s) for {doc.RootElement.GetProperty("app")}:");
+        foreach (var t in targets.EnumerateArray())
+        {
+            var b = t.GetProperty("Bounds");
+            Console.WriteLine($"  [{t.GetProperty("Type")}] {Quote(t.GetProperty("Caption").GetString())}"
+                + $"  @{b.GetProperty("X")},{b.GetProperty("Y")} {b.GetProperty("Width")}x{b.GetProperty("Height")}"
+                + $"  score={t.GetProperty("Score")}");
+        }
+        if (show && targets.GetArrayLength() > 0)
+        {
+            Console.WriteLine("(boxes on screen for 5 s...)");
+            await Task.Delay(5500); // the overlay lives in this process; stay alive while it shows
+        }
         return 0;
     }
 
