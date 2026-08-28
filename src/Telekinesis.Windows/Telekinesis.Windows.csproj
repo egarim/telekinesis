@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Telekinesis.Abstractions\Telekinesis.Abstractions.csproj" />
+    <ProjectReference Include="..\Telekinesis.Vision\Telekinesis.Vision.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -11,6 +12,7 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!-- Lets `dotnet build` compile this project on Linux/macOS CI machines too. -->

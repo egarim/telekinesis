@@ -142,25 +142,75 @@ public static class PerceptionTools
     }
 
     [McpServerTool(Name = "parse_screen")]
-    [Description("Screenshot the screen (or a region) and parse it into UI elements with an OmniParser sidecar. Last resort when the accessibility tree fails; returned bounds are screen pixels usable with click_at. Requires an OmniParser server (see docs/VISION.md).")]
+    [Description("Screenshot the screen (or a region) and parse it into UI elements with an OmniParser sidecar. Last resort when the accessibility tree fails; returned bounds are screen pixels usable with click_at. A screen seen before is answered instantly from perceptual memory (source:'memory'); pass applicationId to enable memory and anchor learning. Requires an OmniParser server (see docs/VISION.md) for fresh parses.")]
     public static async Task<string> ParseScreen(
         BackendProvider provider,
+        VisionMemoryService memoryService,
         [Description("Optional region 'x,y,width,height' in screen pixels; empty parses the whole virtual desktop.")] string? region,
+        [Description("Owning application id (pid:N) — enables the parse cache and anchor learning for this app.")] string? applicationId,
         CancellationToken ct)
     {
         var backend = await provider.GetConnectedAsync(ct);
         if (backend is not IScreenCaptureBackend capture)
             throw new NotSupportedException($"{backend.Name} does not support screen capture yet.");
 
-        using var parser = new Telekinesis.Vision.OmniParserClient();
-        if (!await parser.ProbeAsync(ct))
-            throw new InvalidOperationException(
-                $"No OmniParser server at {parser.BaseUrl}. Start one (see docs/VISION.md) or set {Telekinesis.Vision.OmniParserClient.UrlEnvVar}.");
-
         var r = ParseRegion(region);
         var image = await capture.CaptureScreenAsync(r, ct);
-        var elements = await parser.ParseAsync(image, r is null ? null : (r.X, r.Y), ct);
-        return JsonSerializer.Serialize(elements, Json);
+        var origin = r is null ? (0, 0) : (r.X, r.Y);
+
+        // App identity for memory: the process name outlives the pid across runs.
+        var (appKey, windowRect) = await ResolveAppAsync(backend, applicationId, r, image, ct);
+
+        var memory = string.IsNullOrEmpty(applicationId) ? null : memoryService.Memory;
+        IReadOnlyList<Telekinesis.Vision.VisionElement>? elements = memory?.TryRecallParse(appKey, image);
+        var source = elements is not null ? "memory" : "omniparser";
+        if (elements is null)
+        {
+            using var parser = new Telekinesis.Vision.OmniParserClient();
+            if (!await parser.ProbeAsync(ct))
+                throw new InvalidOperationException(
+                    $"No OmniParser server at {parser.BaseUrl}. Start one (see docs/VISION.md) or set {Telekinesis.Vision.OmniParserClient.UrlEnvVar}.");
+            elements = await parser.ParseAsync(image, r is null ? null : (r.X, r.Y), ct);
+            memory?.StoreParse(appKey, image, elements);
+        }
+
+        memoryService.Last = new VisionMemoryService.LastParse(appKey, windowRect, image, origin, elements);
+        return JsonSerializer.Serialize(new { source, elements }, Json);
+    }
+
+    [McpServerTool(Name = "recall_targets")]
+    [Description("Re-locate this application's remembered vision targets (elements successfully acted on before) on the live screen, without running the parser. Returns them with current pixel bounds ready for click_at. Cheap — try this before parse_screen.")]
+    public static async Task<string> RecallTargets(
+        BackendProvider provider,
+        VisionMemoryService memoryService,
+        [Description("Application id (pid:N) whose remembered targets to recall.")] string applicationId,
+        CancellationToken ct)
+    {
+        var backend = await provider.GetConnectedAsync(ct);
+        if (backend is not IScreenCaptureBackend capture)
+            throw new NotSupportedException($"{backend.Name} does not support screen capture yet.");
+        var memory = memoryService.Memory
+            ?? throw new NotSupportedException("Perceptual memory is not available on this platform yet.");
+
+        var image = await capture.CaptureScreenAsync(null, ct);
+        var (appKey, windowRect) = await ResolveAppAsync(backend, applicationId, null, image, ct);
+        var targets = memory.Recall(appKey, windowRect, image, (0, 0));
+        return JsonSerializer.Serialize(new { app = appKey, targets }, Json);
+    }
+
+    /// <summary>App identity (stable process name) and window rectangle for anchor normalization.</summary>
+    private static async Task<(string AppKey, Bounds WindowRect)> ResolveAppAsync(
+        IAccessibilityBackend backend, string? applicationId, Bounds? region, ScreenImage image, CancellationToken ct)
+    {
+        if (!string.IsNullOrEmpty(applicationId))
+        {
+            var tree = await backend.GetTreeAsync(applicationId, 1, ct);
+            var window = tree.Children?.FirstOrDefault(w => w.Bounds is not null);
+            if (window?.Bounds is { } wb)
+                return (tree.Name ?? applicationId, wb);
+            return (tree.Name ?? applicationId, region ?? new Bounds(0, 0, image.Width, image.Height));
+        }
+        return ("screen", region ?? new Bounds(0, 0, image.Width, image.Height));
     }
 
     internal static Bounds? ParseRegion(string? region)
