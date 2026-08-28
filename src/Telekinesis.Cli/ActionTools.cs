@@ -14,16 +14,30 @@ namespace Telekinesis.Cli;
 public static class ActionTools
 {
     [McpServerTool(Name = "invoke")]
-    [Description("Invoke an element's default action (click a button, activate a menu item).")]
+    [Description("Invoke an element's action. Default activates it (click a button, toggle a checkbox, select a list item). Pass action 'expand'/'collapse' to open or close a combo box or tree item.")]
     public static async Task<string> Invoke(
         BackendProvider provider,
         [Description("Element id from a previous query.")] string elementId,
         [Description("Owning application id.")] string applicationId,
+        [Description("Optional specific action: invoke (default), expand, collapse, toggle, select.")] string? action,
         CancellationToken ct)
     {
         var backend = await provider.GetConnectedAsync(ct);
-        var result = await backend.InvokeAsync(new ElementRef(elementId, applicationId), ct: ct);
-        return Audit("invoke", elementId, result);
+        var result = await backend.InvokeAsync(new ElementRef(elementId, applicationId), action, ct);
+        return Audit(string.IsNullOrEmpty(action) ? "invoke" : action, elementId, result);
+    }
+
+    [McpServerTool(Name = "set_value")]
+    [Description("Set a numeric element's value (slider, spinner, progress) via the native RangeValue pattern.")]
+    public static async Task<string> SetValue(
+        BackendProvider provider,
+        string elementId, string applicationId,
+        [Description("The numeric value to set, within the element's min/max.")] double value,
+        CancellationToken ct)
+    {
+        var backend = await provider.GetConnectedAsync(ct);
+        var result = await backend.SetValueAsync(new ElementRef(elementId, applicationId), value, ct);
+        return Audit("set_value", elementId, result);
     }
 
     [McpServerTool(Name = "set_text")]
