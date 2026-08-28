@@ -68,6 +68,36 @@ if (args.Contains("doctor"))
     return report.Ready ? 0 : 1;
 }
 
+// telekinesis memory            → perceptual-memory stats
+// telekinesis memory export --out <dir> → dump as a training-ready dataset
+if (args.Contains("memory"))
+{
+    var memoryService = new VisionMemoryService();
+    if (memoryService.Memory is null)
+    {
+        Console.Error.WriteLine("Perceptual memory is not available on this platform yet.");
+        return 1;
+    }
+    if (args.Contains("export"))
+    {
+        var outIdx = Array.IndexOf(args, "--out");
+        if (outIdx < 0 || outIdx + 1 >= args.Length)
+        {
+            Console.Error.WriteLine("Usage: telekinesis memory export --out <dir>");
+            return 2;
+        }
+        var count = memoryService.Memory.Export(args[outIdx + 1]);
+        Console.WriteLine($"Exported {count} grounded sample(s) to {args[outIdx + 1]} (dataset.jsonl + crops/).");
+        return 0;
+    }
+    var (parses, anchors, dir) = memoryService.Memory.Stats();
+    Console.WriteLine($"Perceptual memory at {dir}");
+    Console.WriteLine($"  cached parses : {parses}");
+    Console.WriteLine($"  anchors       : {anchors}");
+    Console.WriteLine("Export as a training dataset with: telekinesis memory export --out <dir>");
+    return 0;
+}
+
 if (args.Contains("setup"))
 {
     Console.WriteLine(
@@ -101,6 +131,7 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
 builder.Services.AddSingleton<BackendProvider>();
+builder.Services.AddSingleton<VisionMemoryService>();
 
 var mcp = builder.Services
     .AddMcpServer()
