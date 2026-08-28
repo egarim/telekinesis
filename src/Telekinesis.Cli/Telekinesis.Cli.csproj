@@ -42,6 +42,7 @@
     <ProjectReference Include="..\Telekinesis.Linux\Telekinesis.Linux.csproj" />
     <ProjectReference Include="..\Telekinesis.MacOS\Telekinesis.MacOS.csproj" />
     <ProjectReference Include="..\Telekinesis.Vision\Telekinesis.Vision.csproj" />
+    <ProjectReference Include="..\Telekinesis.Pilot\Telekinesis.Pilot.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="$(TargetFramework.Contains('-windows'))">
