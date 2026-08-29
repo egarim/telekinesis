@@ -1,0 +1,37 @@
+{
+  "name": "blog-navigate",
+  "narration": "The ghost browses the web: Chromium projects the whole DOM into the accessibility tree, so links are named elements with native actions — no pixels, no DOM scraping, no browser driver.",
+  "notes": "VALIDATED on Windows 11 + Microsoft Edge. Open https://www.jocheojeda.com in Edge first and pass --app pid:<edge>. Gotcha: one Edge process hosts every window, so match names precisely — post-card links contain their whole summary text.",
+  "steps": [
+    { "say": "Checking the blog home is on screen",
+      "tool": "assert_element",
+      "args": { "nameContains": "Notes on .NET", "mustBe": "visible", "timeoutMs": 8000 } },
+
+    { "say": "Finding tonight's read by name — a link in the accessibility tree, not a box of pixels",
+      "tool": "find_elements",
+      "args": { "role": "Link", "nameContains": "Curb Cut" },
+      "bind": "post" },
+
+    { "say": "Showing the human what the ghost is looking at",
+      "tool": "highlight",
+      "args": { "elementId": "{{post.Ref.Id}}", "applicationId": "{{post.Ref.ApplicationId}}",
+                "label": "chosen by name, not pixels", "durationMs": 2500 } },
+
+    { "say": "Opening the post — native invoke on the link",
+      "tool": "invoke",
+      "args": { "elementId": "{{post.Ref.Id}}", "applicationId": "{{post.Ref.ApplicationId}}" } },
+
+    { "say": "Verifying the navigation by the new page title",
+      "tool": "assert_element",
+      "args": { "nameContains": "Curb Cut for AI Agents", "mustBe": "exists", "timeoutMs": 10000 } },
+
+    { "say": "Going back — the browser's own Back button, also just a named element",
+      "tool": "invoke",
+      "pre": [ { "tool": "find_elements", "args": { "role": "Button", "nameContains": "Back" }, "bind": "back" } ],
+      "args": { "elementId": "{{back.Ref.Id}}", "applicationId": "{{back.Ref.ApplicationId}}" } },
+
+    { "say": "Home again — verified",
+      "tool": "assert_element",
+      "args": { "nameContains": "Notes on .NET", "mustBe": "visible", "timeoutMs": 8000 } }
+  ]
+}
