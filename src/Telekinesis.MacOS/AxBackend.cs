@@ -88,6 +88,13 @@ public sealed class AxBackend : IAccessibilityBackend
         finally { CF.ReleaseIf(app); }
     }
 
+    public Task<AccessibleElement> GetSubtreeAsync(ElementRef element, int maxDepth = 3, CancellationToken ct = default)
+    {
+        var el = Resolve(element);
+        var pid = ParsePid(element.ApplicationId);
+        return Task.FromResult(ReadNode(el, pid, maxDepth, ct, reuseId: element.Id));
+    }
+
     public Task<IReadOnlyList<AccessibleElement>> FindElementsAsync(ElementQuery query, CancellationToken ct = default)
     {
         const int NodeCap = 20_000;
@@ -99,7 +106,12 @@ public sealed class AxBackend : IAccessibilityBackend
             ? new[] { ParsePid(a) }
             : ListApplicationsInternal().Select(x => x.ProcessId ?? 0).Where(p => p != 0);
         var apps = new List<IntPtr>();
-        foreach (var pid in pids)
+        if (query.Within is { } within)
+        {
+            // Registry-held handle; not ours to release.
+            queue.Enqueue((Resolve(within), ParsePid(within.ApplicationId)));
+        }
+        else foreach (var pid in pids)
         {
             var app = Ax.AXUIElementCreateApplication(pid);
             apps.Add(app);
@@ -123,6 +135,8 @@ public sealed class AxBackend : IAccessibilityBackend
                     if (query.WithStates is not { } req || (states & req) == req)
                         results.Add(BuildElement(el, pid, role, normalized, name, states, GetBounds(el), null, 0, null));
                 }
+                if (query.ExcludeDocumentContent && normalized == AccessibleRole.Document)
+                    continue; // chrome-only search: the page lives beneath Documents
                 foreach (var child in CopyChildren(el))
                     queue.Enqueue((child, pid)); // retained; released via handle table lifetime
             }

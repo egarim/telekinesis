@@ -41,12 +41,13 @@ public static class PerceptionTools
     }
 
     [McpServerTool(Name = "find_elements")]
-    [Description("Search for elements by role and/or name substring, optionally within one application. Prefer this over dumping trees.")]
+    [Description("Search for elements by role and/or name substring, optionally within one application. Prefer this over dumping trees. For browsers, scope 'page' searches only the web page content and 'chrome' only the browser's own UI — without it, page links are shadowed by same-named browser controls.")]
     public static async Task<string> FindElements(
         BackendProvider provider,
         [Description("Normalized role, e.g. Button, Edit, MenuItem. Empty for any.")] string? role,
         [Description("Case-insensitive substring of the element name. Empty for any.")] string? nameContains,
         [Description("Restrict to this application id; empty searches all.")] string? applicationId,
+        [Description("For browser windows: 'window' (default, everything), 'page' (web page content only), 'chrome' (browser UI only). Requires applicationId.")] string? scope,
         CancellationToken ct)
     {
         var backend = await provider.GetConnectedAsync(ct);
@@ -56,8 +57,114 @@ public static class PerceptionTools
             Role = Enum.TryParse<AccessibleRole>(role, ignoreCase: true, out var r) ? r : null,
             NameContains = string.IsNullOrEmpty(nameContains) ? null : nameContains,
         };
+
+        switch (string.IsNullOrEmpty(scope) ? "window" : scope.ToLowerInvariant())
+        {
+            case "window":
+                break;
+            case "chrome":
+                if (query.ApplicationId is null)
+                    throw new ArgumentException("scope 'chrome' requires applicationId.");
+                query = query with { ExcludeDocumentContent = true };
+                break;
+            case "page":
+                if (query.ApplicationId is null)
+                    throw new ArgumentException("scope 'page' requires applicationId.");
+                var doc = await BrowserPages.FindDocumentAsync(backend, query.ApplicationId, titleContains: null, ct)
+                    ?? throw new InvalidOperationException(BrowserPages.NoDocumentHint);
+                query = query with { Within = doc.Ref };
+                break;
+            default:
+                throw new ArgumentException($"Unknown scope '{scope}' (expected window, page or chrome).");
+        }
+
         var results = await backend.FindElementsAsync(query, ct);
         return JsonSerializer.Serialize(results, Json);
+    }
+
+    [McpServerTool(Name = "read_page")]
+    [Description("Read the web page in a browser as one compact snapshot: reading text plus interactive elements (links, buttons, fields) with ids ready for invoke/set_text. Finds the page's Document automatically — prefer this over get_tree for browsers, where the page sits many levels deep.")]
+    public static async Task<string> ReadPage(
+        BackendProvider provider,
+        [Description("Browser application id (pid:N); empty uses the focused application.")] string? applicationId,
+        [Description("Substring of the page title (tab name) to pick, since one browser process hosts every tab and window. Empty picks the largest visible page.")] string? titleContains,
+        [Description("Max interactive elements to return (default 120).")] int maxElements,
+        [Description("Max characters of reading text (default 6000).")] int maxTextChars,
+        CancellationToken ct)
+    {
+        var backend = await provider.GetConnectedAsync(ct);
+        if (string.IsNullOrEmpty(applicationId))
+        {
+            var focused = await backend.GetFocusedAsync(ct)
+                ?? throw new ArgumentException("No applicationId given and nothing has focus.");
+            applicationId = focused.Ref.ApplicationId;
+        }
+        if (maxElements <= 0) maxElements = 120;
+        if (maxTextChars <= 0) maxTextChars = 6000;
+
+        var doc = await BrowserPages.FindDocumentAsync(backend, applicationId, titleContains, ct);
+        if (doc is null)
+            return JsonSerializer.Serialize(new { status = "no-document", applicationId, hint = BrowserPages.NoDocumentHint }, Json);
+
+        // Chromium realizes the page tree lazily; the find above usually warms it,
+        // so an empty Document gets one deep retry before we report it as inactive.
+        var subtree = await backend.GetSubtreeAsync(doc.Ref, maxDepth: 40, ct);
+        if ((subtree.Children?.Count ?? 0) == 0)
+        {
+            subtree = await backend.GetSubtreeAsync(doc.Ref, maxDepth: 40, ct);
+            if ((subtree.Children?.Count ?? 0) == 0)
+                return JsonSerializer.Serialize(new { status = "empty-document", applicationId, document = doc.Ref, hint = BrowserPages.ActivationHint }, Json);
+        }
+
+        var elements = new List<object>(maxElements);
+        var text = new System.Text.StringBuilder();
+        var truncated = FlattenPage(subtree, elements, text, maxElements, maxTextChars);
+
+        // Documents with a text pattern report the whole reading text at the root —
+        // prefer that (correct document order) over the assembled node names.
+        var reading = !string.IsNullOrWhiteSpace(subtree.Text) ? subtree.Text! : text.ToString();
+        var textTruncated = reading.Length > maxTextChars;
+        if (textTruncated) reading = reading[..maxTextChars];
+
+        return JsonSerializer.Serialize(new
+        {
+            status = "ok",
+            applicationId,
+            document = new { id = subtree.Ref.Id, name = subtree.Name },
+            text = reading,
+            textTruncated,
+            elements,
+            elementsTruncated = truncated,
+        }, Json);
+    }
+
+    /// <summary>Depth-first flatten preserving document order. Returns true when the element cap was hit.</summary>
+    private static bool FlattenPage(
+        AccessibleElement node, List<object> elements, System.Text.StringBuilder text, int maxElements, int maxTextChars)
+    {
+        var truncated = false;
+        foreach (var child in node.Children ?? [])
+        {
+            if (BrowserPages.IsInteractive(child.Role))
+            {
+                if (elements.Count >= maxElements) { truncated = true; continue; }
+                elements.Add(new
+                {
+                    id = child.Ref.Id,
+                    role = child.Role.ToString(),
+                    name = child.Name,
+                    bounds = child.Bounds,
+                    actions = child.Actions.Count > 0 ? child.Actions : null,
+                });
+            }
+            else if (child.Role is AccessibleRole.Text or AccessibleRole.Label or AccessibleRole.Header
+                     && !string.IsNullOrWhiteSpace(child.Name) && text.Length < maxTextChars)
+            {
+                text.AppendLine(child.Name);
+            }
+            truncated |= FlattenPage(child, elements, text, maxElements, maxTextChars);
+        }
+        return truncated;
     }
 
     [McpServerTool(Name = "read_element")]

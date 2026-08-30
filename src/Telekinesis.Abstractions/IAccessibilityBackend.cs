@@ -23,6 +23,13 @@ public interface IAccessibilityBackend : IAsyncDisposable
     /// <summary>Depth-limited subtree. Never returns unbounded trees.</summary>
     Task<AccessibleElement> GetTreeAsync(string applicationId, int maxDepth = 3, CancellationToken ct = default);
 
+    /// <summary>
+    /// Depth-limited subtree rooted at a previously returned element — the
+    /// drill-down primitive for deep trees (browser pages live many levels below
+    /// the window). Throws <see cref="StaleElementException"/> when the element is gone.
+    /// </summary>
+    Task<AccessibleElement> GetSubtreeAsync(ElementRef element, int maxDepth = 3, CancellationToken ct = default);
+
     Task<IReadOnlyList<AccessibleElement>> FindElementsAsync(ElementQuery query, CancellationToken ct = default);
 
     /// <summary>Re-resolve a handle and return full current detail; throws <see cref="StaleElementException"/> if gone.</summary>

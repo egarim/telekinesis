@@ -41,6 +41,13 @@ public sealed record ElementQuery
 {
     /// <summary>Restrict to one application; null searches every application on the bus.</summary>
     public string? ApplicationId { get; init; }
+    /// <summary>Restrict to the subtree rooted at this element (e.g. a browser
+    /// page's Document node). Takes precedence over <see cref="ApplicationId"/> seeding.</summary>
+    public ElementRef? Within { get; init; }
+    /// <summary>Do not descend into <see cref="AccessibleRole.Document"/> subtrees —
+    /// searches only the application's own chrome (address bar, tabs, toolbars).
+    /// Document nodes themselves still match.</summary>
+    public bool ExcludeDocumentContent { get; init; }
     public AccessibleRole? Role { get; init; }
     /// <summary>Case-insensitive substring match on Name.</summary>
     public string? NameContains { get; init; }

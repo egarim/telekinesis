@@ -169,6 +169,20 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         };
     }, ct);
 
+    public Task<AccessibleElement> GetSubtreeAsync(ElementRef element, int maxDepth = 3, CancellationToken ct = default) => Task.Run(() =>
+    {
+        var el = Resolve(element);
+        try
+        {
+            return ReadNode(el, maxDepth, ct, existingRef: element);
+        }
+        catch (ElementNotAvailableException)
+        {
+            _registry.TryRemove(element.Id, out _);
+            throw new StaleElementException(element);
+        }
+    }, ct);
+
     public Task<IReadOnlyList<AccessibleElement>> FindElementsAsync(ElementQuery query, CancellationToken ct = default) => Task.Run(() =>
     {
         // Breadth-first over the control view, bounded by MaxResults and a node cap
@@ -179,7 +193,11 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         var visited = 0;
 
         var queue = new Queue<AutomationElement>();
-        if (query.ApplicationId is { } appId)
+        if (query.Within is { } within)
+        {
+            queue.Enqueue(Resolve(within));
+        }
+        else if (query.ApplicationId is { } appId)
         {
             var pid = ParsePid(appId);
             foreach (var el in GetChildren(AutomationElement.RootElement))
@@ -198,9 +216,12 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
             var el = queue.Dequeue();
             visited++;
 
+            var descend = true;
             try
             {
                 var role = UiaRoleMap.Normalize(el.Current.ControlType);
+                if (query.ExcludeDocumentContent && role == AccessibleRole.Document)
+                    descend = false; // chrome-only search: the page lives beneath Documents
                 if (role == AccessibleRole.Edit && el.Current.IsPassword) role = AccessibleRole.PasswordEdit;
                 var name = el.Current.Name;
 
@@ -228,6 +249,7 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
             }
             catch (ElementNotAvailableException) { continue; }
 
+            if (!descend) continue;
             foreach (var child in GetChildren(el))
                 queue.Enqueue(child);
         }
@@ -697,7 +719,9 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
     {
         if (role is not (AccessibleRole.Text or AccessibleRole.Edit or AccessibleRole.Label or AccessibleRole.Document))
             return null;
-        if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var v))
+        // Chromium Documents report the page URL through ValuePattern; the real
+        // reading text lives in TextPattern — so for Documents, text first.
+        if (role != AccessibleRole.Document && el.TryGetCurrentPattern(ValuePattern.Pattern, out var v))
         {
             var s = TryGet(() => ((ValuePattern)v).Current.Value);
             if (!string.IsNullOrEmpty(s)) return s;
@@ -705,6 +729,11 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         if (el.TryGetCurrentPattern(TextPattern.Pattern, out var t))
         {
             var s = TryGet(() => ((TextPattern)t).DocumentRange.GetText(MaxTextLength));
+            if (!string.IsNullOrEmpty(s)) return s;
+        }
+        if (role == AccessibleRole.Document && el.TryGetCurrentPattern(ValuePattern.Pattern, out var dv))
+        {
+            var s = TryGet(() => ((ValuePattern)dv).Current.Value);
             if (!string.IsNullOrEmpty(s)) return s;
         }
         return null;

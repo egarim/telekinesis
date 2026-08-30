@@ -44,6 +44,11 @@ MCP client config:
   [perceptual memory](docs/PERCEPTUAL-MEMORY.md), which also learns the targets that
   worked (`recall_targets`) and exports them as a training-ready dataset. See
   [docs/VISION.md](docs/VISION.md).
+- **Browsers, first-class** â€” the web comes through the same tree: `read_page`
+  snapshots a page (reading text + links/buttons/fields with actionable ids),
+  `find_elements` scopes to `page` or `chrome` so browser UI stops shadowing page
+  content, and `navigate` loads a URL. No browser driver, no CDP, no scraping. See
+  [docs/BROWSERS.md](docs/BROWSERS.md).
 - **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
   element, `probe --overlay` draws live labeled boxes over a whole app, and
   `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
