@@ -126,7 +126,7 @@ internal static class ScenarioRunner
             "wait_for" => await PerceptionTools.WaitFor(provider, S("kind") ?? "", I("timeoutMs", 2000), default),
             "highlight" => await PerceptionTools.Highlight(provider, S("elementId"), S("applicationId"), S("region"), S("label"), I("durationMs"), default),
             "assert_element" => await AssertTools.AssertElement(provider, S("role"), S("nameContains"), S("applicationId"), S("mustBe"), I("timeoutMs", 3000), default),
-            "recall_targets" => await PerceptionTools.RecallTargets(provider, memoryService, S("applicationId")!, a.TryGetValue("show", out var sh) && sh is not null && (bool)sh.AsValue(), default),
+            "recall_targets" => await VisionTools.RecallTargets(provider, memoryService, S("applicationId")!, a.TryGetValue("show", out var sh) && sh is not null && (bool)sh.AsValue(), default),
             "invoke" => await ActionTools.Invoke(provider, memoryService, S("elementId")!, S("applicationId")!, S("action"), default),
             "set_text" => await ActionTools.SetText(provider, memoryService, S("elementId")!, S("applicationId")!, S("text") ?? "", default),
             "set_value" => await ActionTools.SetValue(provider, S("elementId")!, S("applicationId")!, (double)a["value"]!.AsValue(), default),

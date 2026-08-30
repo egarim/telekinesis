@@ -14,6 +14,20 @@ public sealed class BackendProvider : IAsyncDisposable
     private IAccessibilityBackend? _backend;
     private bool _connected;
 
+    /// <summary>The provider-plugin registry this instance resolves through.</summary>
+    public ProviderRegistry Registry { get; } = ProviderRegistry.Default;
+
+    /// <summary>
+    /// The backend to use for one application: the highest-priority provider
+    /// plugin that claims it (e.g. the browser provider for a browser process),
+    /// or the base OS backend when none does. Null application id → base.
+    /// </summary>
+    public async Task<IAccessibilityBackend> GetForAppAsync(string? applicationId, CancellationToken ct = default)
+    {
+        var backend = await GetConnectedAsync(ct);
+        return string.IsNullOrEmpty(applicationId) ? backend : Registry.ResolveFor(backend, applicationId);
+    }
+
     public static IAccessibilityBackend CreateForCurrentOs()
     {
         if (OperatingSystem.IsLinux())

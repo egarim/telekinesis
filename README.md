@@ -1,4 +1,4 @@
-﻿# Telekinesis
+# Telekinesis
 
 <img src="docs/media/telekinesis-mascot-512.png" alt="The Telekinesis ghost" width="160" align="right"/>
 
@@ -49,7 +49,11 @@ MCP client config:
   `find_elements` scopes to `page` or `chrome` so browser UI stops shadowing page
   content, and `navigate` loads a URL. No browser driver, no CDP, no scraping. See
   [docs/BROWSERS.md](docs/BROWSERS.md).
-- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
+- **Provider plugins** — app-matched fidelity behind the same interface: a registry
+  resolves each application to the highest-priority provider that claims it (the
+  browser provider un-shadows page content by default; the vision tier is the built-in
+  fallback provider). External plugins load only by explicit opt-in and are flagged by
+  `doctor`. See [docs/PROVIDERS.md](docs/PROVIDERS.md).- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
   element, `probe --overlay` draws live labeled boxes over a whole app, and
   `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
   input lands. Click-through, never steals focus. See [docs/XRAY-OVERLAY.md](docs/XRAY-OVERLAY.md).
