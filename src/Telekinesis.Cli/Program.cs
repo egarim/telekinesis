@@ -194,6 +194,33 @@ if (args.Contains("doctor"))
         Console.WriteLine($"  [{(visionOk ? "ok" : "--")}] vision: OmniParser sidecar at {parser.BaseUrl} "
             + (visionOk ? "is reachable." : $"not reachable (optional; see docs/VISION.md)."));
     }
+    // Browsers publish their pages into the tree only once renderer accessibility
+    // is active (Chromium activates it lazily). Report each running browser.
+    try
+    {
+        var connected = await provider.GetConnectedAsync();
+        foreach (var app in await connected.ListApplicationsAsync())
+        {
+            if (app.ProcessId is not { } pid) continue;
+            string name;
+            try { name = System.Diagnostics.Process.GetProcessById(pid).ProcessName.ToLowerInvariant(); }
+            catch { continue; }
+            if (name is not ("msedge" or "chrome" or "chromium" or "firefox" or "brave" or "vivaldi" or "opera")) continue;
+
+            var doc = await Telekinesis.Cli.BrowserPages.FindDocumentAsync(connected, app.Id, titleContains: null, default);
+            var realized = false;
+            if (doc is not null)
+            {
+                var node = await connected.ReadElementAsync(doc.Ref);
+                realized = node.ChildCount > 0;
+            }
+            Console.WriteLine(realized
+                ? $"  [ok] browser: {name} ({app.Id}) — page accessibility active."
+                : $"  [--] browser: {name} ({app.Id}) — page tree not realized. Chromium builds it lazily; read_page warms it, or relaunch with --force-renderer-accessibility.");
+        }
+    }
+    catch { /* browser check is best-effort; never blocks readiness */ }
+
     Console.WriteLine(report.Ready ? "Ready." : "Not ready — fix the items above.");
     return report.Ready ? 0 : 1;
 }

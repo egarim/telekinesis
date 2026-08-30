@@ -100,7 +100,7 @@ internal static class ScenarioRunner
     }
 
     private static bool IsActionTool(string? tool) => tool is "invoke" or "set_text" or "set_value" or "click"
-        or "type_text" or "press_keys" or "click_at" or "fill_credential";
+        or "type_text" or "press_keys" or "click_at" or "fill_credential" or "navigate";
 
     private static async Task ExecuteAsync(JsonObject step, Dictionary<string, JsonNode?> bindings,
         BackendProvider provider, VisionMemoryService memoryService, IAccessibilityBackend backend, bool quiet)
@@ -118,7 +118,9 @@ internal static class ScenarioRunner
 
         var result = tool switch
         {
-            "find_elements" => await PerceptionTools.FindElements(provider, S("role"), S("nameContains"), S("applicationId"), default),
+            "find_elements" => await PerceptionTools.FindElements(provider, S("role"), S("nameContains"), S("applicationId"), S("scope"), default),
+            "read_page" => await PerceptionTools.ReadPage(provider, S("applicationId"), S("titleContains"), I("maxElements"), I("maxTextChars"), default),
+            "navigate" => await ActionTools.Navigate(provider, S("applicationId")!, S("url") ?? "", default),
             "read_element" => await PerceptionTools.ReadElement(provider, S("elementId")!, S("applicationId")!, default),
             "get_focused" => await PerceptionTools.GetFocused(provider, default),
             "wait_for" => await PerceptionTools.WaitFor(provider, S("kind") ?? "", I("timeoutMs", 2000), default),

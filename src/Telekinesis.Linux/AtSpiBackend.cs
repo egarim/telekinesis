@@ -151,6 +151,19 @@ public sealed class AtSpiBackend : IAccessibilityBackend
         return await ReadNodeAsync(applicationId, RootPath, maxDepth, ct);
     }
 
+    public async Task<AccessibleElement> GetSubtreeAsync(ElementRef element, int maxDepth = 3, CancellationToken ct = default)
+    {
+        var (service, path) = DecodeRef(element);
+        try
+        {
+            return await ReadNodeAsync(service, path, maxDepth, ct);
+        }
+        catch (DBusExceptionBase)
+        {
+            throw new StaleElementException(element);
+        }
+    }
+
     public async Task<IReadOnlyList<AccessibleElement>> FindElementsAsync(ElementQuery query, CancellationToken ct = default)
     {
         // Breadth-first over the accessible tree, bounded by MaxResults and a node
@@ -162,7 +175,9 @@ public sealed class AtSpiBackend : IAccessibilityBackend
 
         // Seed with the requested app, or every application on the bus.
         var queue = new Queue<(string Service, string Path)>();
-        if (!string.IsNullOrEmpty(query.ApplicationId))
+        if (query.Within is { } within)
+            queue.Enqueue(DecodeRef(within));
+        else if (!string.IsNullOrEmpty(query.ApplicationId))
             queue.Enqueue((query.ApplicationId, RootPath));
         else
             foreach (var app in await ListApplicationsAsync(ct))
@@ -201,6 +216,8 @@ public sealed class AtSpiBackend : IAccessibilityBackend
                 }
             }
 
+            if (query.ExcludeDocumentContent && role == AccessibleRole.Document)
+                continue; // chrome-only search: the page lives beneath Documents
             foreach (var child in await GetChildrenAsync(service, path))
                 queue.Enqueue(child);
         }

@@ -122,6 +122,44 @@ public static class ActionTools
         return Audit("click_at", $"({x},{y})", result);
     }
 
+    [McpServerTool(Name = "navigate")]
+    [Description("Navigate a browser to a URL: finds the address bar in the browser's chrome, focuses it, sets the URL and presses Enter. Convenience over find/click/set_text/press_keys.")]
+    public static async Task<string> Navigate(
+        BackendProvider provider,
+        [Description("Browser application id (pid:N).")] string applicationId,
+        [Description("The URL to load.")] string url,
+        CancellationToken ct)
+    {
+        var backend = await provider.GetConnectedAsync(ct);
+
+        // The address bar is an editable Edit in the browser chrome; every major
+        // browser names it with "address" (Edge "Search or enter web address",
+        // Chrome "Address and search bar", Firefox "…or enter address").
+        var edits = await backend.FindElementsAsync(new ElementQuery
+        {
+            ApplicationId = applicationId,
+            Role = AccessibleRole.Edit,
+            ExcludeDocumentContent = true,
+            MaxResults = 10,
+        }, ct);
+        var bar = edits.FirstOrDefault(e =>
+                      e.Name?.Contains("address", StringComparison.OrdinalIgnoreCase) == true)
+                  ?? edits.FirstOrDefault(e => (e.States & ElementState.Editable) != 0)
+                  ?? edits.FirstOrDefault();
+        if (bar is null)
+            return Audit("navigate", url, ActionResult.Failed(ActionPath.NativeAction,
+                "No address bar found in the browser chrome — is this application a browser?"));
+
+        // Click to focus (also fronts the browser), set the full URL, commit.
+        var click = await backend.ClickAsync(bar.Ref, PointerButton.Left, ct);
+        if (!click.Success) return Audit("navigate", url, click);
+        await Task.Delay(150, ct); // let focus settle
+        var set = await backend.SetTextAsync(bar.Ref, url, ct);
+        if (!set.Success) return Audit("navigate", url, set);
+        var enter = await backend.PressKeysAsync("enter", ct);
+        return Audit("navigate", url, enter);
+    }
+
     private static string Audit(string tool, string target, ActionResult result)
     {
         // Audit trail: every action lands on stderr (visible in MCP client logs)
