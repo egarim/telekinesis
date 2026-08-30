@@ -363,7 +363,7 @@ internal static class Probe
             return 2;
         }
         var memoryService = new VisionMemoryService();
-        var json = await PerceptionTools.RecallTargets(provider, memoryService, app, show, default);
+        var json = await VisionTools.RecallTargets(provider, memoryService, app, show, default);
         var doc = System.Text.Json.JsonDocument.Parse(json);
         var targets = doc.RootElement.GetProperty("targets");
         Console.WriteLine($"{targets.GetArrayLength()} remembered target(s) for {doc.RootElement.GetProperty("app")}:");

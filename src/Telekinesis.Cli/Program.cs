@@ -153,9 +153,9 @@ if (args.FirstOrDefault() == "serve")
     web.Services.AddSingleton<BackendProvider>();
     web.Services.AddSingleton<VisionMemoryService>();
     var sse = web.Services.AddMcpServer().WithHttpTransport()
-        .WithTools([typeof(PerceptionTools), typeof(AssertTools)]);
+        .WithTools([typeof(PerceptionTools), typeof(AssertTools), .. ProviderRegistry.Default.TrustedToolTypes]);
     if (enableActions)
-        sse.WithTools([typeof(ActionTools), typeof(CredentialTools)]);
+        sse.WithTools([typeof(ActionTools), typeof(CredentialTools), .. ProviderRegistry.Default.ExternalToolTypes]);
 
     var app = web.Build();
     Microsoft.AspNetCore.Builder.McpEndpointRouteBuilderExtensions.MapMcp(app);
@@ -194,6 +194,15 @@ if (args.Contains("doctor"))
         Console.WriteLine($"  [{(visionOk ? "ok" : "--")}] vision: OmniParser sidecar at {parser.BaseUrl} "
             + (visionOk ? "is reachable." : $"not reachable (optional; see docs/VISION.md)."));
     }
+    // Provider plugins: which are loaded, and whether any came from outside the
+    // tree. External assemblies run with the server's full power — flag them.
+    foreach (var entry in Telekinesis.Cli.ProviderRegistry.Default.Entries)
+        Console.WriteLine(entry.External
+            ? $"  [!!] provider: {entry.Plugin.Name} (priority {entry.Plugin.Priority}) — EXTERNAL, unsigned, loaded from {entry.Origin}. It has the same power as the server itself."
+            : $"  [ok] provider: {entry.Plugin.Name} (priority {entry.Plugin.Priority}, built-in).");
+    foreach (var warning in Telekinesis.Cli.ProviderRegistry.Default.LoadWarnings)
+        Console.WriteLine($"  [--] provider: {warning}");
+
     // Browsers publish their pages into the tree only once renderer accessibility
     // is active (Chromium activates it lazily). Report each running browser.
     try
@@ -293,10 +302,10 @@ builder.Services.AddSingleton<VisionMemoryService>();
 var mcp = builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithTools([typeof(PerceptionTools), typeof(AssertTools)]);
+    .WithTools([typeof(PerceptionTools), typeof(AssertTools), .. ProviderRegistry.Default.TrustedToolTypes]);
 
 if (!readOnly)
-    mcp.WithTools([typeof(ActionTools), typeof(CredentialTools)]);
+    mcp.WithTools([typeof(ActionTools), typeof(CredentialTools), .. ProviderRegistry.Default.ExternalToolTypes]);
 
 await builder.Build().RunAsync();
 return 0;
