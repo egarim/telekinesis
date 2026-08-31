@@ -201,7 +201,11 @@ Telekinesis without any scraping.
   element (id, role, name, intent, risk, requiresConfirmation) when rendered; use it to
   give an ordinary button its business intent and risk.
 
-See `samples/MediumDemo` for a working Blazor Server app that serves the manifest.
+See `samples/MediumDemo` for a working Blazor Server app that serves the manifest —
+including a **Movies** page modeled on Microsoft's `dotnet/blazor-samples`
+`BlazorWebAppMovies`. Its movie commands are annotated with `[Medium*]`, so the build-time
+generator autogenerates semantics that enrich the same controls Telekinesis perceives, and
+the app writes the sidecar manifest next to its executable for Telekinesis to merge.
 
 ---
 
