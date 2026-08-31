@@ -184,6 +184,25 @@ Telekinesis.Medium.WinForms
 Uno is first-class: Medium should build on the same `AutomationPeer` accessibility
 metadata already exposed by `uno-atspi-bridge`, not invent a separate representation.
 
+### Blazor adapter (done, this PR)
+
+`Telekinesis.Medium.Blazor` lets a Blazor app serve its Medium semantics over HTTP — the
+same channel the browser provider already reads, so a Blazor page becomes richer to
+Telekinesis without any scraping.
+
+- **`MediumManifestBuilder`** — a DI singleton that collects `MediumElement`s (app-global
+  or per-view), idempotent by semantic id (last wins), and `Build()`s a `MediumManifest`.
+- **`AddTelekinesisMedium()`** registers it; **`MapMediumManifest()`** maps
+  `/telekinesis.medium.json` to the latest manifest.
+- **`MediumDomMapper`** — maps a rendered DOM element (tag + ARIA + `data-medium-*`) onto
+  Medium semantics (role, accessible name, deterministic semantic id), so common controls
+  (buttons, text inputs, checkboxes, links, lists, selects) are recognized automatically.
+- **`<MediumSemantic/>`** — a Razor component that declaratively registers a semantic
+  element (id, role, name, intent, risk, requiresConfirmation) when rendered; use it to
+  give an ordinary button its business intent and risk.
+
+See `samples/MediumDemo` for a working Blazor Server app that serves the manifest.
+
 ---
 
 ## Build roadmap
@@ -191,12 +210,14 @@ metadata already exposed by `uno-atspi-bridge`, not invent a separate representa
 - **Phase 1 — core semantic contract** *(done, PR #29)*: `Telekinesis.Medium`,
   versioned model, JSON serialization, stable-ID rules, risk/intent/confirmation,
   unit tests, this doc.
-- **Phase 2 — Telekinesis merge path** *(this PR)*: discovery/loading of Medium metadata
+- **Phase 2 — Telekinesis merge path** *(done, PR #30)*: discovery/loading of Medium metadata
   (sidecar manifest), merge onto accessibility elements via `MediumEnrichingBackend`,
   expose enriched fields in read/find output, non-Medium apps unchanged; tests for merge
   precedence, missing/stale metadata and role disambiguation.
-- **Phase 3 — Uno proof of concept**: minimal `Telekinesis.Medium.Uno` adapter and a
-  small sample end-to-end.
+- **Phase 3 — framework adapter** *(Blazor done, this PR)*: `Telekinesis.Medium.Blazor`
+  with a manifest builder + `/telekinesis.medium.json` endpoint, DOM mapping, and a
+  `<MediumSemantic/>` component; a working sample end-to-end. (Uno remains a priority
+  follow-up reusing `uno-atspi-bridge`.)
 - **Phase 4 — Roslyn generator/analyzer**: deterministic compile-time derivation of IDs,
   action metadata, and diagnostics; never requires an LLM during a normal build.
 
