@@ -38,6 +38,12 @@ var generated = Telekinesis.Medium.Generated.GeneratedMedium.Build();
 foreach (var element in generated.Views.Values.SelectMany(v => v.Elements).Concat(generated.Elements))
     medium.Register(element);
 
+// Persist the manifest as the sidecar Telekinesis's MediumDiscovery reads next to the
+// app executable, so the browser provider can merge it onto the page's accessibility tree.
+File.WriteAllText(
+    Path.Combine(AppContext.BaseDirectory, MediumSchema.FileName),
+    MediumJson.Serialize(medium.Build()));
+
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {

@@ -1,0 +1,61 @@
+@page "/movies"
+@rendermode InteractiveServer
+@using MediumDemo.Components
+
+<PageTitle>Movies</PageTitle>
+
+<h1>Movies</h1>
+
+<p>
+    This page mirrors Microsoft's <code>dotnet/blazor-samples</code>
+    <code>BlazorWebAppMovies</code> form. Its commands are annotated with
+    <code>[Medium*]</code>, which the Medium generator turns into semantic metadata
+    (stable ids, intent, risk, confirmation) — enriching what Telekinesis already sees
+    through the accessibility tree.
+</p>
+
+<label for="movie-title">Title</label>
+<input id="movie-title" @bind="movie.Title" />
+<br />
+<label for="movie-genre">Genre</label>
+<input id="movie-genre" @bind="movie.Genre" />
+<br />
+<label for="movie-price">Price</label>
+<input id="movie-price" type="number" step="0.01" @bind="movie.Price" />
+<br />
+<button type="button" class="btn btn-primary" @onclick="Create">Create Movie</button>
+<button type="button" class="btn btn-danger" @onclick="Delete">Delete Movie</button>
+
+<ul>
+    @foreach (var m in movies)
+    {
+        <li>@m.Title (@m.Genre) — @m.Price.ToString("C")</li>
+    }
+</ul>
+
+@code {
+    private MovieFormViewModel movie = new();
+    private readonly List<Movie> movies = new()
+    {
+        new() { Title = "Raiders of the Lost Ark", Genre = "Action", Price = 9.99m },
+    };
+
+    private void Create()
+    {
+        if (string.IsNullOrWhiteSpace(movie.Title)) return;
+        movies.Add(new Movie { Title = movie.Title.Trim(), Genre = movie.Genre.Trim(), Price = movie.Price });
+        movie = new MovieFormViewModel();
+    }
+
+    private void Delete()
+    {
+        if (movies.Count > 0) movies.RemoveAt(movies.Count - 1);
+    }
+
+    private sealed class Movie
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Genre { get; set; } = string.Empty;
+        public decimal Price { get; set; }
+    }
+}
