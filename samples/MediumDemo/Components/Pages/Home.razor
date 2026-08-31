@@ -1,0 +1,19 @@
+@page "/"
+@using Telekinesis.Medium
+@using Telekinesis.Medium.Blazor
+
+<PageTitle>Home</PageTitle>
+
+<h1>Hello, world!</h1>
+
+Welcome to your new app.
+
+<MediumSemantic View="InvoiceEditor" SemanticId="invoice.delete" Role="button"
+                Name="Delete Invoice" Intent="invoice.delete"
+                Risk="MediumRisk.Destructive" RequiresConfirmation="true">
+    <button class="btn btn-danger" @onclick="DeleteAsync">Delete Invoice</button>
+</MediumSemantic>
+
+@code {
+    private async Task DeleteAsync() { await Task.CompletedTask; }
+}

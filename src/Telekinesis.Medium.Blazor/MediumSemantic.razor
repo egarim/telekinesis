@@ -1,0 +1,42 @@
+@inject Telekinesis.Medium.Blazor.MediumManifestBuilder Builder
+@implements IDisposable
+
+@ChildContent
+
+@code {
+    /// <summary>Stable, app-unique semantic id (e.g. invoice.create).</summary>
+    [Parameter] public string SemanticId { get; set; } = string.Empty;
+    /// <summary>Semantic role, e.g. button, textbox, link.</summary>
+    [Parameter] public string Role { get; set; } = string.Empty;
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public string? Description { get; set; }
+    /// <summary>Business intent, e.g. invoice.create.</summary>
+    [Parameter] public string? Intent { get; set; }
+    [Parameter] public MediumRisk Risk { get; set; } = MediumRisk.Unknown;
+    [Parameter] public bool RequiresConfirmation { get; set; }
+    /// <summary>Optional view/route to group the element under.</summary>
+    [Parameter] public string? View { get; set; }
+    [Parameter] public IEnumerable<string>? Actions { get; set; }
+    /// <summary>Optional child content this declaration wraps.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnInitialized()
+    {
+        // Opt-in declaration: registering is idempotent by semantic id.
+        var element = new MediumElement
+        {
+            SemanticId = SemanticId,
+            Role = Role,
+            Name = Name,
+            Description = Description,
+            Intent = Intent,
+            Risk = Risk,
+            RequiresConfirmation = RequiresConfirmation,
+            Actions = Actions?.ToList() ?? [],
+        };
+        if (string.IsNullOrWhiteSpace(View)) Builder.Register(element);
+        else Builder.RegisterView(View, element);
+    }
+
+    public void Dispose() { }
+}
