@@ -61,8 +61,40 @@ MediumElement:
   Metadata              (arbitrary, extensible)
 ```
 
-An element maps naturally onto Telekinesis's normalized accessibility element; Phase 2
-merges these onto the runtime tree rather than forming a parallel hierarchy.
+An element maps naturally onto Telekinesis's normalized accessibility element; the
+merge path (below) enriches the runtime tree rather than forming a parallel hierarchy.
+
+### Merging with the runtime tree
+
+`MediumMerger` associates a manifest's elements with runtime accessibility elements by
+**accessible name** (case-insensitive), disambiguated by role when several Medium
+elements share a name. `MediumEnrichingBackend` wraps a resolved accessibility backend and
+applies that merge to every element returned by `get_tree`, `get_subtree`, `find_elements`
+and `read_element`, so the agent keeps using the same tools and sees extra advisory fields
+on matched elements:
+
+```json
+{
+  "semanticId": "invoice.delete",
+  "intent": "invoice.delete",
+  "risk": "destructive",
+  "requiresConfirmation": true
+}
+```
+
+Enrichment is **additive and safe**:
+
+- It never invents elements (no phantom controls) and never overwrites the element's own
+  native name, role, address, or states.
+- `Risk` and `RequiresConfirmation` only surface when explicitly declared — an element
+  with undeclared risk is treated as Unknown by policy, never "safe".
+- Non-Medium apps are untouched: a backend is only wrapped when the app ships a
+  `telekinesis.medium.json`, and unmatched elements stay identical (nullable fields are
+  omitted from JSON).
+
+Discovery in the CLI (Phase 2) locates a **sidecar** `telekinesis.medium.json` next to the
+app's executable (`MediumManifestFile` + `MediumDiscovery`); missing or malformed manifests
+are treated as "no Medium" and never break resolution.
 
 ### Risk defaults
 
@@ -156,13 +188,13 @@ metadata already exposed by `uno-atspi-bridge`, not invent a separate representa
 
 ## Build roadmap
 
-- **Phase 1 — core semantic contract** *(this milestone)*: `Telekinesis.Medium`,
+- **Phase 1 — core semantic contract** *(done, PR #29)*: `Telekinesis.Medium`,
   versioned model, JSON serialization, stable-ID rules, risk/intent/confirmation,
   unit tests, this doc.
-- **Phase 2 — Telekinesis merge path**: discovery/loading of Medium metadata,
-  merge onto accessibility elements, expose enriched fields in read/find output,
-  ensure non-Medium apps behave identically; tests for merge precedence and missing/stale
-  metadata.
+- **Phase 2 — Telekinesis merge path** *(this PR)*: discovery/loading of Medium metadata
+  (sidecar manifest), merge onto accessibility elements via `MediumEnrichingBackend`,
+  expose enriched fields in read/find output, non-Medium apps unchanged; tests for merge
+  precedence, missing/stale metadata and role disambiguation.
 - **Phase 3 — Uno proof of concept**: minimal `Telekinesis.Medium.Uno` adapter and a
   small sample end-to-end.
 - **Phase 4 — Roslyn generator/analyzer**: deterministic compile-time derivation of IDs,

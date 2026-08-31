@@ -29,6 +29,16 @@ public sealed record AccessibleElement
     public double? Value { get; init; }
     /// <summary>Names of native actions this element supports (e.g. "invoke", "expand").</summary>
     public IReadOnlyList<string> Actions { get; init; } = [];
+
+    // Medium semantic enrichment (nullable so non-Medium apps serialize identically —
+    // see docs/MEDIUM.md). These are advisory metadata, not an alternate action path.
+    public string? SemanticId { get; init; }
+    public string? Intent { get; init; }
+    /// <summary>Medium risk category: unknown | read | write | destructive | privileged.</summary>
+    public string? Risk { get; init; }
+    public bool? RequiresConfirmation { get; init; }
+    public IReadOnlyList<string>? MediumActions { get; init; }
+
     public int ChildCount { get; init; }
     /// <summary>Populated only by tree queries, up to the requested depth.</summary>
     public IReadOnlyList<AccessibleElement>? Children { get; init; }
