@@ -53,7 +53,11 @@ MCP client config:
   resolves each application to the highest-priority provider that claims it (the
   browser provider un-shadows page content by default; the vision tier is the built-in
   fallback provider). External plugins load only by explicit opt-in and are flagged by
-  `doctor`. See [docs/PROVIDERS.md](docs/PROVIDERS.md).- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
+  `doctor`. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
+- **Medium (coming)** — build accessible apps for *humans and AI agents*: an SDK +
+  semantic layer that lets an app enrich the accessibility tree with stable IDs, intent,
+  risk, and confirmation requirements, merged onto the same element model. See
+  [docs/MEDIUM.md](docs/MEDIUM.md).- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
   element, `probe --overlay` draws live labeled boxes over a whole app, and
   `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
   input lands. Click-through, never steals focus. See [docs/XRAY-OVERLAY.md](docs/XRAY-OVERLAY.md).
