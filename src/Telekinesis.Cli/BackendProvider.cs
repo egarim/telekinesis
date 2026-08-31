@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using Telekinesis.Abstractions;
 using Telekinesis.Linux;
+using Telekinesis.Medium;
 
 namespace Telekinesis.Cli;
 
@@ -14,18 +16,28 @@ public sealed class BackendProvider : IAsyncDisposable
     private IAccessibilityBackend? _backend;
     private bool _connected;
 
+    /// <summary>Cached Medium manifests per application id (null = app not Medium-enabled).</summary>
+    private readonly ConcurrentDictionary<string, MediumManifest?> _medium = new();
+
     /// <summary>The provider-plugin registry this instance resolves through.</summary>
     public ProviderRegistry Registry { get; } = ProviderRegistry.Default;
 
     /// <summary>
     /// The backend to use for one application: the highest-priority provider
     /// plugin that claims it (e.g. the browser provider for a browser process),
-    /// or the base OS backend when none does. Null application id → base.
+    /// wrapped by Medium enrichment when the app ships a Medium manifest, or the
+    /// base OS backend when neither applies. Null application id → base.
     /// </summary>
     public async Task<IAccessibilityBackend> GetForAppAsync(string? applicationId, CancellationToken ct = default)
     {
         var backend = await GetConnectedAsync(ct);
-        return string.IsNullOrEmpty(applicationId) ? backend : Registry.ResolveFor(backend, applicationId);
+        if (string.IsNullOrEmpty(applicationId)) return backend;
+
+        // Provider resolution first (browser/vision/etc.), then Medium enrichment on top,
+        // so they compose rather than compete. Non-Medium apps are returned untouched.
+        var resolved = Registry.ResolveFor(backend, applicationId);
+        var medium = _medium.GetOrAdd(applicationId, MediumDiscovery.TryLoad);
+        return medium is null ? resolved : new MediumEnrichingBackend(resolved, medium);
     }
 
     public static IAccessibilityBackend CreateForCurrentOs()
