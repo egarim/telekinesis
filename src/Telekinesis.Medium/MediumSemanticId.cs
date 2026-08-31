@@ -30,7 +30,7 @@ public static class MediumSemanticId
             return false;
         }
 
-        var s = raw.ToLowerInvariant();
+        var s = InsertCamelBoundaries(raw).ToLowerInvariant();
         var segments = new List<string>();
         var cur = new StringBuilder();
 
@@ -86,5 +86,24 @@ public static class MediumSemanticId
         if (!TryNormalize(raw, out var norm, out var error))
             throw new ArgumentException(error, nameof(raw));
         return norm!;
+    }
+
+    /// <summary>
+    /// Insert a space at camelCase word boundaries so "CreateInvoice" normalizes to
+    /// "create.invoice" rather than "createinvoice". Keeps the segment rule uniform with
+    /// the generator. Uppercase runs (acronyms like "PDF") are kept intact.
+    /// </summary>
+    private static string InsertCamelBoundaries(string name)
+    {
+        var sb = new StringBuilder();
+        for (var i = 0; i < name.Length; i++)
+        {
+            var c = name[i];
+            if (i > 0 && char.IsUpper(c) &&
+                (char.IsLower(name[i - 1]) || (i + 1 < name.Length && char.IsLower(name[i + 1]))))
+                sb.Append(' ');
+            sb.Append(c);
+        }
+        return sb.ToString();
     }
 }
