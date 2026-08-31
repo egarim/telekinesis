@@ -10,6 +10,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Telekinesis.Medium.Blazor\Telekinesis.Medium.Blazor.csproj" />
     <ProjectReference Include="..\..\src\Telekinesis.Medium\Telekinesis.Medium.csproj" />
+    <!-- The Roslyn generator ships the Medium semantics as an analyzer; it emits
+         GeneratedMedium during the app build (no LLM, deterministic). -->
+    <ProjectReference Include="..\..\src\Telekinesis.Medium.Generators\Telekinesis.Medium.Generators.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
