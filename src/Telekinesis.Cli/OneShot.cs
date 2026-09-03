@@ -365,7 +365,7 @@ internal static class OneShot
         await File.WriteAllTextAsync(bat, $"""
             @echo off
             "{Environment.ProcessPath}" {cmdLine} > "{outFile}" 2> "{errFile}"
-            echo %errorlevel%> "{rcFile}"
+            (echo %errorlevel%)> "{rcFile}"
             """);
         // wscript runs the batch with window style 0 — no console flash on the
         // user's desktop while an agent polls snapshot/find in a loop.
