@@ -23,7 +23,7 @@
     <!-- Dual-licensed: AGPL-3.0 (this package) or commercial — see COMMERCIAL.md. -->
     <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <Version>0.7.0</Version>
+    <Version>0.8.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
