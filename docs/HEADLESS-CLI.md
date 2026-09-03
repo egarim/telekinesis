@@ -48,21 +48,38 @@ Resolution prefers an exact name match, then a visible+enabled match, then the f
 hit. `snapshot` emits a ready-made `query` per element, so the loop is:
 `snapshot` → pick a `query` → act with it.
 
-## `launch` — the SSH story
+## The Windows session trap, and the relay
 
-A GUI app started from a Windows SSH session lands in a non-interactive session:
-nothing renders and UIA sees nothing. `telekinesis launch` therefore routes through a
-one-shot Scheduled Task on Windows, which the Task Scheduler starts **in the logged-on
-user's console session**. No extra privileges needed when the SSH user is the
-logged-on user. On Linux/macOS it is a plain child-process start — the CLI exits
+A process started over SSH on Windows runs in **session 0**, not the interactive
+console session. Live-proven on real hardware: from there UIA sees *no windows at
+all* (`apps` returns `[]`), input injection reaches no desktop, and a launched GUI
+app never renders. So on Windows the CLI handles both directions itself:
+
+- **`launch`** routes through a one-shot Scheduled Task (`/IT`), which the Task
+  Scheduler starts **in the logged-on user's console session**. No extra privileges
+  needed when the SSH user is the logged-on user.
+- **Every other verb auto-relays**: when the CLI detects it is outside the console
+  session, it re-runs the same command line there via a hidden one-shot Scheduled
+  Task (no window flashes on the user's desktop) and streams back stdout, stderr,
+  and the exit code. `ssh winbox telekinesis apps` just works; a `[telekinesis]
+  … relaying …` note goes to stderr. A user must be logged on at the console;
+  the relay times out after 60 s (`TELEKINESIS_RELAY_TIMEOUT` overrides). Set
+  `TELEKINESIS_NO_RELAY=1` to disable.
+
+On Linux/macOS, `launch` is a plain child-process start — the CLI exits
 immediately, so the app is reparented and lives on (point `DISPLAY` at the desktop
-as usual).
+as usual); perception/actions need no relay.
 
-The process is started by the Task Scheduler, so no pid is returned — verify with:
+A launched process is started by the Task Scheduler, so no pid is returned — verify
+with:
 
 ```
 telekinesis assert --name "My App" --timeout-ms 10000
 ```
+
+UWP apps (Calculator, Media Player, …) all host their windows in one
+`ApplicationFrameHost.exe`, so they share one `pid:N` application id — scope queries
+by role/name, not by app alone.
 
 ## Example: remote verification over SSH
 

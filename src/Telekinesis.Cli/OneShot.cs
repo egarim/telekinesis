@@ -59,6 +59,17 @@ internal static class OneShot
         if (verb == "launch")
             return await LaunchAsync(operands);
 
+        // A Windows SSH/service session (session 0) can't see the interactive
+        // desktop's UIA tree AND can't inject input into it — live-proven on a
+        // Surface: `apps` returns [] from session 0. So every other verb relays:
+        // re-run this same command line in the console session via a hidden
+        // one-shot Scheduled Task and stream back stdout/stderr/exit code.
+        if (WindowsSession.NeedsRelay())
+        {
+            Console.Error.WriteLine("[telekinesis] non-interactive session detected — relaying via the console session.");
+            return await RelayAsync(args);
+        }
+
         await using var provider = new BackendProvider();
         try
         {
@@ -318,6 +329,78 @@ internal static class OneShot
             AuditLog.Append("cli-launch", exe, false, ex.Message);
             Console.WriteLine(JsonSerializer.Serialize(new { ok = false, error = ex.Message }, PerceptionTools.Json));
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Re-run this exact command line inside the interactive console session:
+    /// a hidden one-shot Scheduled Task runs a batch that captures stdout/stderr
+    /// and the exit code to files, which we poll, replay, and clean up. Makes
+    /// `ssh winbox telekinesis apps` just work from session 0.
+    /// </summary>
+    internal static async Task<int> RelayAsync(string[] args)
+    {
+        if (args.Any(a => a.Contains('"')))
+        {
+            Console.Error.WriteLine("relay: arguments must not contain '\"' characters.");
+            return 2;
+        }
+        var dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Telekinesis", "relay", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var outFile = Path.Combine(dir, "out.txt");
+        var errFile = Path.Combine(dir, "err.txt");
+        var rcFile = Path.Combine(dir, "rc.txt");
+        // Under `dotnet tool` the process is dotnet.exe hosting our dll — the relayed
+        // command line must carry the dll path again or it would just run bare dotnet.
+        var relayArgs = new List<string>();
+        if (Path.GetFileNameWithoutExtension(Environment.ProcessPath!)
+                .Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            relayArgs.Add(Environment.GetCommandLineArgs()[0]);
+        relayArgs.AddRange(args);
+        var cmdLine = string.Join(' ',
+            relayArgs.Select(a => a.Any(char.IsWhiteSpace) || a.Length == 0 ? $"\"{a}\"" : a));
+        var bat = Path.Combine(dir, "run.cmd");
+        await File.WriteAllTextAsync(bat, $"""
+            @echo off
+            "{Environment.ProcessPath}" {cmdLine} > "{outFile}" 2> "{errFile}"
+            echo %errorlevel%> "{rcFile}"
+            """);
+        // wscript runs the batch with window style 0 — no console flash on the
+        // user's desktop while an agent polls snapshot/find in a loop.
+        var vbs = Path.Combine(dir, "run.vbs");
+        await File.WriteAllTextAsync(vbs,
+            $"CreateObject(\"Wscript.Shell\").Run \"\"\"{bat}\"\"\", 0, True");
+
+        var task = $"telekinesis-relay-{Guid.NewGuid():N}";
+        try
+        {
+            await SchtasksAsync("/Create", "/F", "/TN", task, "/SC", "ONCE", "/ST", "00:00", "/IT",
+                "/TR", $"wscript \"{vbs}\"");
+            await SchtasksAsync("/Run", "/TN", task);
+            // rc.txt is written last, so its existence means out/err are complete.
+            var deadline = DateTime.UtcNow.AddSeconds(
+                int.TryParse(Environment.GetEnvironmentVariable("TELEKINESIS_RELAY_TIMEOUT"), out var s) ? s : 60);
+            while (!File.Exists(rcFile))
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    Console.Error.WriteLine("relay: timed out waiting for the console-session run "
+                        + "(is a user logged on at the console?).");
+                    return 1;
+                }
+                await Task.Delay(200);
+            }
+            await Task.Delay(100); // let the final writes flush
+            Console.Out.Write(await File.ReadAllTextAsync(outFile));
+            Console.Error.Write(await File.ReadAllTextAsync(errFile));
+            return int.TryParse((await File.ReadAllTextAsync(rcFile)).Trim(), out var rc) ? rc : 1;
+        }
+        finally
+        {
+            try { await SchtasksAsync("/Delete", "/TN", task, "/F"); } catch { /* best effort */ }
+            try { Directory.Delete(dir, recursive: true); } catch { /* best effort */ }
         }
     }
 

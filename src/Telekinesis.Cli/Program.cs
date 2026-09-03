@@ -121,6 +121,12 @@ if (args.FirstOrDefault() == "pilot-eval")
 // CI contract: exit 0 when the condition holds within the timeout, 1 otherwise.
 if (args.FirstOrDefault() == "assert")
 {
+    // Same wrong-session trap as the one-shot verbs (docs/HEADLESS-CLI.md).
+    if (WindowsSession.NeedsRelay())
+    {
+        Console.Error.WriteLine("[telekinesis] non-interactive session detected — relaying via the console session.");
+        return await OneShot.RelayAsync(args);
+    }
     string? Opt(string name)
     {
         var i = Array.IndexOf(args, name);
