@@ -152,8 +152,50 @@ public class MediumMergerTests
                 },
             },
         };
-        var e = MediumMerger.Enrich(manifest, Button(null!) with { Name = null, AutomationId = "btnSave123" });
+        var e = MediumMerger.Enrich(manifest, Button("unused") with { Name = null, AutomationId = "btnSave123" });
         Assert.Equal("legacy.save", e.SemanticId);
+    }
+
+    [Fact]
+    public void Explicit_automationId_beats_semanticId_convention_on_collision()
+    {
+        var manifest = Manifest();
+        var view = manifest.Views["InvoiceEditor"];
+        manifest = manifest with
+        {
+            Views = new Dictionary<string, MediumView>
+            {
+                // "save.button" exists as a SemanticId already; this entry claims the
+                // same string as an EXPLICIT AutomationId and must win deterministically.
+                ["InvoiceEditor"] = view with
+                {
+                    Elements = [.. view.Elements,
+                        new() { SemanticId = "other.thing", Role = "button", AutomationId = "save.button" }],
+                },
+            },
+        };
+        var e = MediumMerger.Enrich(manifest, Button("Whatever") with { AutomationId = "save.button" });
+        Assert.Equal("other.thing", e.SemanticId);
+    }
+
+    [Fact]
+    public void Empty_string_manifest_automationId_does_not_shadow_semanticId_fallback()
+    {
+        var manifest = Manifest();
+        var view = manifest.Views["InvoiceEditor"];
+        manifest = manifest with
+        {
+            Views = new Dictionary<string, MediumView>
+            {
+                ["InvoiceEditor"] = view with
+                {
+                    Elements = [.. view.Elements,
+                        new() { SemanticId = "empty.id", Role = "button", AutomationId = "" }],
+                },
+            },
+        };
+        var e = MediumMerger.Enrich(manifest, Button("X") with { AutomationId = "empty.id" });
+        Assert.Equal("empty.id", e.SemanticId);
     }
 
     [Fact]

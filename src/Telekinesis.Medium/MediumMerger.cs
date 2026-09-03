@@ -55,8 +55,14 @@ public static class MediumMerger
         // outright. Ordinal: platform ids are developer-assigned exact strings.
         if (!string.IsNullOrEmpty(element.AutomationId))
         {
-            var byId = AllElements(manifest).FirstOrDefault(m =>
-                string.Equals(m.AutomationId ?? m.SemanticId, element.AutomationId, StringComparison.Ordinal));
+            // Two deterministic tiers: an EXPLICIT manifest automationId always beats the
+            // semanticId-as-key convention, and an empty-string automationId (e.g. from a
+            // hand-written manifest) counts as absent rather than shadowing the fallback.
+            var all = AllElements(manifest).ToList();
+            var byId = all.FirstOrDefault(m =>
+                    string.Equals(m.AutomationId, element.AutomationId, StringComparison.Ordinal))
+                ?? all.FirstOrDefault(m => string.IsNullOrEmpty(m.AutomationId) &&
+                    string.Equals(m.SemanticId, element.AutomationId, StringComparison.Ordinal));
             if (byId is not null) return byId;
         }
 
