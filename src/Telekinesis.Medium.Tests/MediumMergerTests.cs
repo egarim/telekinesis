@@ -199,6 +199,49 @@ public class MediumMergerTests
     }
 
     [Fact]
+    public void Duplicate_ids_across_views_disambiguate_by_role()
+    {
+        var manifest = Manifest() with
+        {
+            Views = new Dictionary<string, MediumView>
+            {
+                ["A"] = new() { Elements = [new() { SemanticId = "save", Role = "link", Name = "Save" }] },
+                ["B"] = new() { Elements = [new() { SemanticId = "save", Role = "button", Name = "Save", Risk = MediumRisk.Write }] },
+            },
+        };
+        var e = MediumMerger.Enrich(manifest, Button("Guardar") with { AutomationId = "save" });
+        Assert.Equal("write", e.Risk); // the button entry, not view A's link
+    }
+
+    [Fact]
+    public void Nameless_container_with_colliding_id_never_binds()
+    {
+        // WPF derives AutomationId from x:Name — a Grid named "invoice.delete" must not
+        // receive the delete button's destructive metadata.
+        var container = new AccessibleElement
+        {
+            Ref = new ElementRef("r", "pid:1"),
+            Role = AccessibleRole.Group,
+            NativeRole = "Grid",
+            Name = null,
+            AutomationId = "invoice.delete",
+        };
+        var e = MediumMerger.Enrich(Manifest(), container);
+        Assert.Null(e.SemanticId);
+        Assert.Null(e.Risk);
+    }
+
+    [Fact]
+    public void Incompatible_id_candidate_falls_through_to_name_matching()
+    {
+        // The id points at a textbox entry, but the runtime element is a button with a
+        // matching name — the name path resolves it instead of a wrong id attach.
+        var e = MediumMerger.Enrich(Manifest(),
+            Button("Create Invoice") with { AutomationId = "invoice.customer" });
+        Assert.Equal("invoice.create", e.SemanticId);
+    }
+
+    [Fact]
     public void AutomationId_is_ordinal_case_sensitive_and_falls_back_to_name()
     {
         // Wrong-case id does not match; the name fallback still resolves it.
