@@ -46,6 +46,16 @@ class _MediumManifestBuilder implements Builder {
 
     if (views.isEmpty && global.isEmpty) return; // no Medium members → no manifest
 
+    // Semantic ids must be app-unique (MediumElement contract) — warn on clashes.
+    final seen = <String>{};
+    for (final element in [...views.values.expand((e) => e), ...global]) {
+      final id = element['semanticId'] as String;
+      if (!seen.add(id)) {
+        log.warning("Medium: duplicate semanticId '$id' — ids must be unique "
+            'within the application (override with @MediumSemanticId).');
+      }
+    }
+
     final manifest = <String, Object?>{
       'schemaVersion': '1.0',
       'application':
@@ -66,8 +76,14 @@ class _MediumManifestBuilder implements Builder {
     Map<String, List<Map<String, Object?>>> views,
     List<Map<String, Object?>> global,
   ) {
-    // Mixins and enums scan too — the C# generator catches members on any type.
-    for (final type in [...library.classes, ...library.mixins, ...library.enums]) {
+    // Every container type scans — the C# generator catches members anywhere.
+    for (final type in [
+      ...library.classes,
+      ...library.mixins,
+      ...library.enums,
+      ...library.extensions,
+      ...library.extensionTypes,
+    ]) {
       for (final member in [
         ...type.fields,
         ...type.getters,
@@ -76,7 +92,13 @@ class _MediumManifestBuilder implements Builder {
       ]) {
         final element = _analyze(member);
         if (element != null) {
-          views.putIfAbsent(type.name ?? '', () => []).add(element);
+          final viewName = type.name;
+          // Unnamed extensions have no view identity — their members go global.
+          if (viewName == null || viewName.isEmpty) {
+            global.add(element);
+          } else {
+            views.putIfAbsent(viewName, () => []).add(element);
+          }
         }
       }
     }
@@ -100,11 +122,35 @@ class _MediumManifestBuilder implements Builder {
     for (final annotation in member.metadata.annotations) {
       final value = annotation.computeConstantValue();
       final type = value?.type;
-      final typeName = type?.getDisplayString();
-      if (value == null || type == null || typeName == null) continue;
+      var typeName = type?.getDisplayString();
       // Same rule as the C# generator's namespace check: only annotations from
       // this package count, so unrelated classes that share a name are ignored.
-      final uri = type.element?.library?.uri.toString();
+      var uri = type?.element?.library?.uri.toString();
+      if (value == null || typeName == null) {
+        // Constant evaluation failed. The C# generator detects the attribute
+        // syntactically and still emits the member with defaults — mirror that
+        // by falling back to the annotation's resolved element identity.
+        final el = annotation.element;
+        uri = el?.library?.uri.toString();
+        typeName = el?.enclosingElement?.name ?? el?.name;
+        if (typeName == 'mediumRequiresConfirmation') {
+          typeName = 'MediumRequiresConfirmation';
+        }
+        if (uri == null ||
+            !uri.startsWith('package:telekinesis_medium/') ||
+            !const {
+              'MediumIntent',
+              'MediumRiskOf',
+              'MediumRequiresConfirmation',
+              'MediumRole',
+              'MediumSemanticId',
+            }.contains(typeName)) {
+          continue;
+        }
+        if (typeName == 'MediumRequiresConfirmation') requiresConfirmation = true;
+        isMedium = true; // emit with defaults; the value itself is unavailable
+        continue;
+      }
       if (uri == null || !uri.startsWith('package:telekinesis_medium/')) {
         continue;
       }

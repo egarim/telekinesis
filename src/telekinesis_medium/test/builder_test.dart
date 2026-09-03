@@ -24,6 +24,14 @@ class InvoiceEditor {
 
 @MediumIntent('app.logout')
 void logoutButton() {}
+
+@MediumRole('checkbox')
+bool nightModeToggle = false;
+
+extension PatientOps on String {
+  @MediumIntent('patient.archive')
+  void archivePatient() {}
+}
 ''';
 
 void main() {
@@ -65,8 +73,17 @@ void main() {
     expect(customer['role'], 'textbox');
 
     final global = manifest['elements'] as List;
-    expect(global.single['intent'], 'app.logout');
-    expect(global.single['semanticId'], 'logout'); // Button suffix stripped
+    final logout = global.singleWhere((e) => e['intent'] == 'app.logout');
+    expect(logout['semanticId'], 'logout'); // Button suffix stripped
+
+    // top-level variable path
+    final toggle =
+        global.singleWhere((e) => e['semanticId'] == 'night.mode.toggle');
+    expect(toggle['role'], 'checkbox');
+
+    // extension members scan too, into a view named after the extension
+    final ext = manifest['views']['PatientOps']['elements'] as List;
+    expect(ext.single['intent'], 'patient.archive');
   });
 
   test('no annotations → no manifest', () async {
