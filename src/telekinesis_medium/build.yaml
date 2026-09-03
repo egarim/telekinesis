@@ -1,0 +1,7 @@
+builders:
+  medium_manifest:
+    import: "package:telekinesis_medium/builder.dart"
+    builder_factories: ["mediumManifestBuilder"]
+    build_extensions: {"$package$": ["telekinesis.medium.json"]}
+    build_to: source
+    auto_apply: dependents
