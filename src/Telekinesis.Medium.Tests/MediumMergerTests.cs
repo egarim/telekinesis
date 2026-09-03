@@ -122,4 +122,54 @@ public class MediumMergerTests
         var enriched = MediumMerger.EnrichTree(Manifest(), root);
         Assert.Equal("invoice.create", enriched.Children!.Single().SemanticId);
     }
+
+    // ---- AutomationId matching (issue #40) ----
+
+    [Fact]
+    public void AutomationId_matching_semanticId_wins_over_localized_name()
+    {
+        // Localized UI: the name no longer matches the manifest, but the platform
+        // automation id was set to the semantic id — the locale-proof convention.
+        var localized = Button("Factura eliminada") with { AutomationId = "invoice.delete" };
+        var e = MediumMerger.Enrich(Manifest(), localized);
+        Assert.Equal("invoice.delete", e.SemanticId);
+        Assert.Equal("destructive", e.Risk);
+    }
+
+    [Fact]
+    public void Explicit_manifest_automationId_overrides_semanticId_key()
+    {
+        var manifest = Manifest();
+        var view = manifest.Views["InvoiceEditor"];
+        manifest = manifest with
+        {
+            Views = new Dictionary<string, MediumView>
+            {
+                ["InvoiceEditor"] = view with
+                {
+                    Elements = [.. view.Elements,
+                        new() { SemanticId = "legacy.save", Role = "button", AutomationId = "btnSave123" }],
+                },
+            },
+        };
+        var e = MediumMerger.Enrich(manifest, Button(null!) with { Name = null, AutomationId = "btnSave123" });
+        Assert.Equal("legacy.save", e.SemanticId);
+    }
+
+    [Fact]
+    public void AutomationId_is_ordinal_case_sensitive_and_falls_back_to_name()
+    {
+        // Wrong-case id does not match; the name fallback still resolves it.
+        var e = MediumMerger.Enrich(Manifest(),
+            Button("Create Invoice") with { AutomationId = "Invoice.Create" });
+        Assert.Equal("invoice.create", e.SemanticId);
+    }
+
+    [Fact]
+    public void Unrelated_automationId_does_not_block_name_matching()
+    {
+        var e = MediumMerger.Enrich(Manifest(),
+            Button("Customer") with { AutomationId = "textBox7", Role = AccessibleRole.Edit });
+        Assert.Equal("invoice.customer", e.SemanticId);
+    }
 }

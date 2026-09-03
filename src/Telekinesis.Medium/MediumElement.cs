@@ -27,6 +27,10 @@ public sealed record MediumElement
     /// <summary>Accessible name, if any.</summary>
     public string? Name { get; init; }
 
+    /// <summary>Platform automation id to match on when it differs from
+    /// <see cref="SemanticId"/> (the merger tries the semantic id first).</summary>
+    public string? AutomationId { get; init; }
+
     /// <summary>Help/description text, if any.</summary>
     public string? Description { get; init; }
 

@@ -47,7 +47,20 @@ public static class MediumMerger
     /// </summary>
     public static MediumElement? Match(MediumManifest? manifest, AccessibleElement element)
     {
-        if (manifest is null || string.IsNullOrEmpty(element.Name)) return null;
+        if (manifest is null) return null;
+
+        // Locale-independent key first (issue #40): a runtime AutomationId that equals a
+        // manifest element's automationId (or, by convention, its semanticId — set your
+        // platform automation id / Flutter Semantics identifier to the semantic id) wins
+        // outright. Ordinal: platform ids are developer-assigned exact strings.
+        if (!string.IsNullOrEmpty(element.AutomationId))
+        {
+            var byId = AllElements(manifest).FirstOrDefault(m =>
+                string.Equals(m.AutomationId ?? m.SemanticId, element.AutomationId, StringComparison.Ordinal));
+            if (byId is not null) return byId;
+        }
+
+        if (string.IsNullOrEmpty(element.Name)) return null;
 
         var candidates = AllElements(manifest)
             .Where(m => !string.IsNullOrEmpty(m.Name) &&
