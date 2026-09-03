@@ -32,6 +32,11 @@ if (OperatingSystem.IsWindows())
 if (args.Contains("probe"))
     return await Probe.RunAsync(args);
 
+// telekinesis <verb> … → stateless one-shot CLI: JSON to stdout, exit code = status.
+// Shell-only automation (SSH, cron, CI) with no MCP client — see docs/HEADLESS-CLI.md.
+if (OneShot.CanHandle(args.FirstOrDefault()))
+    return await OneShot.RunAsync(args);
+
 // telekinesis repl [--enable-actions] → persistent session, commands on stdin, per-command timing
 if (args.Contains("repl"))
     return await Repl.RunAsync(args);
