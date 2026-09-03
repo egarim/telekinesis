@@ -33,8 +33,11 @@ String _insertCamelBoundaries(String name) {
 
 bool _isUpper(String c) => c != c.toLowerCase() && c == c.toUpperCase();
 bool _isLower(String c) => c != c.toUpperCase() && c == c.toLowerCase();
-bool _isIdChar(String c) =>
-    c == '-' || c == '_' || RegExp(r'^[a-z0-9]$').hasMatch(c);
+
+// Same char class as C#'s char.IsLetterOrDigit — any Unicode letter/digit —
+// so non-ASCII identifiers produce the same ids as the .NET generator.
+final _letterOrDigit = RegExp(r'^[\p{L}\p{N}]$', unicode: true);
+bool _isIdChar(String c) => c == '-' || c == '_' || _letterOrDigit.hasMatch(c);
 
 /// "CreateInvoice" -> "create.invoice"; unusable input -> "unknown".
 String normalizeSemanticId(String raw) {

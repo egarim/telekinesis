@@ -34,7 +34,11 @@ class _MediumManifestBuilder implements Builder {
     final views = <String, List<Map<String, Object?>>>{};
     final global = <Map<String, Object?>>[];
 
-    await for (final input in buildStep.findAssets(Glob('lib/**.dart'))) {
+    // Sort inputs so the emitted manifest is byte-stable across runs — asset
+    // enumeration order is not guaranteed, and this file is committed.
+    final inputs = await buildStep.findAssets(Glob('lib/**.dart')).toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+    for (final input in inputs) {
       if (!await buildStep.resolver.isLibrary(input)) continue;
       final library = await buildStep.resolver.libraryFor(input);
       _scanLibrary(library, views, global);
@@ -62,27 +66,28 @@ class _MediumManifestBuilder implements Builder {
     Map<String, List<Map<String, Object?>>> views,
     List<Map<String, Object?>> global,
   ) {
-    for (final unit in library.units) {
-      for (final cls in unit.classes) {
-        for (final member in [
-          ...cls.fields,
-          ...cls.accessors,
-          ...cls.methods,
-        ]) {
-          final element = _analyze(member);
-          if (element != null) {
-            views.putIfAbsent(cls.name, () => []).add(element);
-          }
-        }
-      }
+    // Mixins and enums scan too — the C# generator catches members on any type.
+    for (final type in [...library.classes, ...library.mixins, ...library.enums]) {
       for (final member in [
-        ...unit.topLevelVariables,
-        ...unit.accessors,
-        ...unit.functions,
+        ...type.fields,
+        ...type.getters,
+        ...type.setters,
+        ...type.methods,
       ]) {
         final element = _analyze(member);
-        if (element != null) global.add(element);
+        if (element != null) {
+          views.putIfAbsent(type.name ?? '', () => []).add(element);
+        }
       }
+    }
+    for (final member in [
+      ...library.topLevelVariables,
+      ...library.getters,
+      ...library.setters,
+      ...library.topLevelFunctions,
+    ]) {
+      final element = _analyze(member);
+      if (element != null) global.add(element);
     }
   }
 
@@ -92,14 +97,14 @@ class _MediumManifestBuilder implements Builder {
     var requiresConfirmation = false;
     var isMedium = false;
 
-    for (final annotation in member.metadata) {
+    for (final annotation in member.metadata.annotations) {
       final value = annotation.computeConstantValue();
       final type = value?.type;
       final typeName = type?.getDisplayString();
       if (value == null || type == null || typeName == null) continue;
       // Same rule as the C# generator's namespace check: only annotations from
       // this package count, so unrelated classes that share a name are ignored.
-      final uri = type.element?.library?.source.uri.toString();
+      final uri = type.element?.library?.uri.toString();
       if (uri == null || !uri.startsWith('package:telekinesis_medium/')) {
         continue;
       }

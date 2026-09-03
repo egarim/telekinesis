@@ -27,9 +27,9 @@ class EnrollmentScreen {
   @MediumIntent('patient.enroll')
   void enrollCommand() {}                 // id: enroll, name: "enroll", role: button
 
-  @MediumRiskOf(MediumRisk.destructive)
-  @mediumRequiresConfirmation
-  void deletePatient() {}                 // destructive without confirmation ⇒ MEDIUM001 warning
+  @MediumRiskOf(MediumRisk.destructive)  // destructive WITHOUT @mediumRequiresConfirmation
+  @mediumRequiresConfirmation            //   would log a MEDIUM001 build warning
+  void deletePatient() {}
 
   @MediumRole('textbox')
   @MediumSemanticId('patient.code')
@@ -71,9 +71,23 @@ humanized member name (`enrollCommand` → `enroll`, `SaveButton` → `Save`).
 Localized labels break the match; keep agent-facing labels locale-stable until
 id-based matching lands (#40).
 
-Flutter caveats: the semantics tree activates lazily (a first UIA query warms
-it); `SelectableText` and custom render objects without `Semantics` are
-invisible to the tree and cannot be matched.
+**Flutter Windows does not expose its widget tree to UIA by default** — an
+agent (or Telekinesis) connecting as a plain UIA client sees only a generic
+`FLUTTERVIEW` pane with no labels, and nothing exists for Medium to merge onto.
+Screen readers trigger semantics automatically; UIA automation clients do not.
+Turn it on explicitly (this also makes the app properly screen-reader
+accessible):
+
+```dart
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  SemanticsBinding.instance.ensureSemantics();
+  runApp(const MyApp());
+}
+```
+
+Further caveats: `SelectableText` and custom render objects without
+`Semantics` are invisible to the tree and cannot be matched.
 
 ## Inference rules (identical to the C# generator)
 

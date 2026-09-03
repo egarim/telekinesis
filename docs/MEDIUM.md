@@ -108,13 +108,16 @@ confirmation or reject it rather than silently allowing it.
 
 The same annotation-driven generation exists for Dart (issue #39):
 [`src/telekinesis_medium`](../src/telekinesis_medium) mirrors the C# attributes
-(`@MediumIntent`, `@MediumRiskOf`, `@mediumRequiresConfirmation`, `@MediumRole`,
-`@MediumSemanticId`) and a `build_runner` builder emits `telekinesis.medium.json`
-with identical inference rules (suffix stripping, camelCase → dot ids, humanized
-names, MEDIUM001 warning). Flutter Windows apps surface UIA through their
-semantics layer, so the merge works unchanged — keep `Semantics(label:)` equal to
-the manifest `name`, and copy the manifest next to the built executable. See the
-package README for the CMake install step and Flutter caveats.
+(`@MediumIntent`, `@MediumRiskOf` — named so because `MediumRisk` is the enum in
+Dart — `@mediumRequiresConfirmation`, `@MediumRole`, `@MediumSemanticId`) and a
+`build_runner` builder emits `telekinesis.medium.json` with identical inference
+rules (suffix stripping, camelCase → dot ids, humanized names, MEDIUM001
+warning). Flutter Windows surfaces UIA through its semantics layer, **but only
+once the app opts in** — call `SemanticsBinding.instance.ensureSemantics()` in
+`main()`, or UIA clients see a bare `FLUTTERVIEW` pane. Then keep
+`Semantics(label:)` equal to the manifest `name` and copy the manifest next to
+the built executable. See the package README for the CMake install step and
+further caveats.
 
 ## Generated manifest
 
