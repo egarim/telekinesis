@@ -20,6 +20,10 @@ public sealed record AccessibleElement
     public required string NativeRole { get; init; }
     public string? Name { get; init; }
     public string? Description { get; init; }
+    /// <summary>Developer-assigned stable id when the platform exposes one (UIA
+    /// AutomationId; Flutter's Semantics identifier surfaces here on Windows).
+    /// Locale-independent, unlike <see cref="Name"/> — preferred for matching.</summary>
+    public string? AutomationId { get; init; }
     public ElementState States { get; init; }
     /// <summary>Screen bounds in device-independent pixels; null when not on screen.</summary>
     public Bounds? Bounds { get; init; }

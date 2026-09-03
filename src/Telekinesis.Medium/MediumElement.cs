@@ -27,6 +27,13 @@ public sealed record MediumElement
     /// <summary>Accessible name, if any.</summary>
     public string? Name { get; init; }
 
+    /// <summary>Platform automation id to match on when it differs from
+    /// <see cref="SemanticId"/>. When set, it SHADOWS the semanticId-as-key
+    /// convention for this element — the merger compares runtime ids against
+    /// this value only, falling back to the semantic id solely for elements
+    /// that leave it unset.</summary>
+    public string? AutomationId { get; init; }
+
     /// <summary>Help/description text, if any.</summary>
     public string? Description { get; init; }
 

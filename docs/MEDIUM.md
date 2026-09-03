@@ -66,9 +66,14 @@ merge path (below) enriches the runtime tree rather than forming a parallel hier
 
 ### Merging with the runtime tree
 
-`MediumMerger` associates a manifest's elements with runtime accessibility elements by
-**accessible name** (case-insensitive), disambiguated by role when several Medium
-elements share a name. `MediumEnrichingBackend` wraps a resolved accessibility backend and
+`MediumMerger` matches a manifest's elements to runtime accessibility elements in two
+passes. First the **locale-proof key** (issue #40): when the runtime element carries a
+platform automation id (UIA AutomationId — Flutter's `Semantics(identifier:)` surfaces
+there on Windows), an ordinal match against the manifest element's `automationId` — or,
+by convention, its `semanticId` — wins outright. **Set your platform automation id to
+the semantic id** and matching survives localization and renames. Otherwise it falls
+back to **accessible name** (case-insensitive), disambiguated by role when several
+Medium elements share a name. `MediumEnrichingBackend` wraps a resolved accessibility backend and
 applies that merge to every element returned by `get_tree`, `get_subtree`, `find_elements`
 and `read_element`, so the agent keeps using the same tools and sees extra advisory fields
 on matched elements:

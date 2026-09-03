@@ -4,10 +4,11 @@ namespace Telekinesis.Medium;
 
 /// <summary>
 /// Merges a <see cref="MediumManifest"/> onto individual normalized accessibility
-/// elements. Matching is by accessible name (ordinal, case-insensitive), disambiguated
-/// by role when several Medium elements share a name. Medium metadata is advisory: only
-/// fields it explicitly declares are copied, and the element's own native name/states are
-/// never overwritten.
+/// elements. Matching is two-pass: a locale-independent platform automation id first
+/// (ordinal, role-plausible — see issue #40), then accessible name (ordinal,
+/// case-insensitive), disambiguated by role when several Medium elements share a name.
+/// Medium metadata is advisory: only fields it explicitly declares are copied, and the
+/// element's own native name/states are never overwritten.
 /// </summary>
 public static class MediumMerger
 {
@@ -43,11 +44,42 @@ public static class MediumMerger
 
     /// <summary>
     /// Find the Medium element that corresponds to <paramref name="element"/>, or null.
-    /// Prefer an exact name match; when several share a name, disambiguate by role.
+    /// A role-plausible automation-id match wins first (explicit automationId, then the
+    /// semanticId-as-key convention); otherwise prefer an exact name match, and when
+    /// several share a name, disambiguate by role.
     /// </summary>
     public static MediumElement? Match(MediumManifest? manifest, AccessibleElement element)
     {
-        if (manifest is null || string.IsNullOrEmpty(element.Name)) return null;
+        if (manifest is null) return null;
+
+        // Locale-independent key first (issue #40): a runtime AutomationId that equals a
+        // manifest element's automationId (or, by convention, its semanticId — set your
+        // platform automation id / Flutter Semantics identifier to the semantic id) wins
+        // outright. Ordinal: platform ids are developer-assigned exact strings.
+        if (!string.IsNullOrEmpty(element.AutomationId))
+        {
+            // Two deterministic tiers: an EXPLICIT manifest automationId always beats the
+            // semanticId-as-key convention, and an empty-string automationId (e.g. from a
+            // hand-written manifest) counts as absent rather than shadowing the fallback.
+            var all = AllElements(manifest).ToList();
+            var ids = all.Where(m =>
+                    string.Equals(m.AutomationId, element.AutomationId, StringComparison.Ordinal))
+                .ToList();
+            if (ids.Count == 0)
+                ids = all.Where(m => string.IsNullOrEmpty(m.AutomationId) &&
+                        string.Equals(m.SemanticId, element.AutomationId, StringComparison.Ordinal))
+                    .ToList();
+
+            // Ids are only unique per view, and WPF derives AutomationId from x:Name even
+            // on containers — so an id candidate must also be role-plausible, exactly like
+            // the name path. An incompatible candidate never binds (a Grid named "save"
+            // must not receive the Save button's destructive metadata); named elements
+            // fall through to name matching instead.
+            var byId = ids.FirstOrDefault(m => MediumRoles.IsCompatible(m.Role, element));
+            if (byId is not null) return byId;
+        }
+
+        if (string.IsNullOrEmpty(element.Name)) return null;
 
         var candidates = AllElements(manifest)
             .Where(m => !string.IsNullOrEmpty(m.Name) &&

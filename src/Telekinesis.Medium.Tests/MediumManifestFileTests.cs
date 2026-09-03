@@ -15,6 +15,7 @@ public class MediumManifestFileTests
             var manifest = MediumManifestFile.TryLoad(dir);
             Assert.NotNull(manifest);
             Assert.Equal("AcmeERP", manifest.Application);
+            Assert.Equal("btnCreate", manifest.Views["V"].Elements.Single().AutomationId);
         }
         finally { Directory.Delete(dir, true); }
     }
@@ -49,7 +50,11 @@ public class MediumManifestFileTests
         Application = "AcmeERP",
         Views = new Dictionary<string, MediumView>
         {
-            ["V"] = new() { Elements = [new MediumElement { SemanticId = "invoice.create", Role = "button", Name = "Create Invoice" }] },
+            ["V"] = new() { Elements = [new MediumElement
+            {
+                SemanticId = "invoice.create", Role = "button", Name = "Create Invoice",
+                AutomationId = "btnCreate", // exercises the #40 field's round-trip
+            }] },
         },
     };
 

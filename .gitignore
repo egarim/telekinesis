@@ -14,3 +14,4 @@ artifacts/
 scripts/telekinesis.exe
 scripts/sandbox-validate-report.txt
 scripts/minimize-region.png
+.pr*.diff

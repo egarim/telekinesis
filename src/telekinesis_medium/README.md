@@ -64,12 +64,13 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../telekinesis.medium.json"
 
 ## Matching rules (what makes it work)
 
-`MediumMerger` matches manifest elements to the runtime tree by **accessible
-name, case-insensitively** (role disambiguates duplicates). So the element's
+`MediumMerger` tries a **locale-proof id first** (#40): give the widget
+`Semantics(identifier: '<semanticId>')` — Flutter surfaces it as the UIA
+AutomationId on Windows — and the element matches by semantic id outright,
+surviving localization and label renames. Without an identifier it falls back
+to **accessible name, case-insensitively** (role disambiguates duplicates), so
 `Semantics(label: ...)` must equal the manifest `name` — by default the
 humanized member name (`enrollCommand` → `enroll`, `SaveButton` → `Save`).
-Localized labels break the match; keep agent-facing labels locale-stable until
-id-based matching lands (#40).
 
 **Flutter Windows does not expose its widget tree to UIA by default** — an
 agent (or Telekinesis) connecting as a plain UIA client sees only a generic

@@ -122,4 +122,139 @@ public class MediumMergerTests
         var enriched = MediumMerger.EnrichTree(Manifest(), root);
         Assert.Equal("invoice.create", enriched.Children!.Single().SemanticId);
     }
+
+    // ---- AutomationId matching (issue #40) ----
+
+    [Fact]
+    public void AutomationId_matching_semanticId_wins_over_localized_name()
+    {
+        // Localized UI: the name no longer matches the manifest, but the platform
+        // automation id was set to the semantic id — the locale-proof convention.
+        var localized = Button("Factura eliminada") with { AutomationId = "invoice.delete" };
+        var e = MediumMerger.Enrich(Manifest(), localized);
+        Assert.Equal("invoice.delete", e.SemanticId);
+        Assert.Equal("destructive", e.Risk);
+    }
+
+    [Fact]
+    public void Explicit_manifest_automationId_overrides_semanticId_key()
+    {
+        var manifest = Manifest();
+        var view = manifest.Views["InvoiceEditor"];
+        manifest = manifest with
+        {
+            Views = new Dictionary<string, MediumView>
+            {
+                ["InvoiceEditor"] = view with
+                {
+                    Elements = [.. view.Elements,
+                        new() { SemanticId = "legacy.save", Role = "button", AutomationId = "btnSave123" }],
+                },
+            },
+        };
+        var e = MediumMerger.Enrich(manifest, Button("unused") with { Name = null, AutomationId = "btnSave123" });
+        Assert.Equal("legacy.save", e.SemanticId);
+    }
+
+    [Fact]
+    public void Explicit_automationId_beats_semanticId_convention_on_collision()
+    {
+        var manifest = Manifest();
+        var view = manifest.Views["InvoiceEditor"];
+        manifest = manifest with
+        {
+            Views = new Dictionary<string, MediumView>
+            {
+                // "save.button" exists as a SemanticId already; this entry claims the
+                // same string as an EXPLICIT AutomationId and must win deterministically.
+                ["InvoiceEditor"] = view with
+                {
+                    Elements = [.. view.Elements,
+                        new() { SemanticId = "other.thing", Role = "button", AutomationId = "save.button" }],
+                },
+            },
+        };
+        var e = MediumMerger.Enrich(manifest, Button("Whatever") with { AutomationId = "save.button" });
+        Assert.Equal("other.thing", e.SemanticId);
+    }
+
+    [Fact]
+    public void Empty_string_manifest_automationId_does_not_shadow_semanticId_fallback()
+    {
+        var manifest = Manifest();
+        var view = manifest.Views["InvoiceEditor"];
+        manifest = manifest with
+        {
+            Views = new Dictionary<string, MediumView>
+            {
+                ["InvoiceEditor"] = view with
+                {
+                    Elements = [.. view.Elements,
+                        new() { SemanticId = "empty.id", Role = "button", AutomationId = "" }],
+                },
+            },
+        };
+        var e = MediumMerger.Enrich(manifest, Button("X") with { AutomationId = "empty.id" });
+        Assert.Equal("empty.id", e.SemanticId);
+    }
+
+    [Fact]
+    public void Duplicate_ids_across_views_disambiguate_by_role()
+    {
+        var manifest = Manifest() with
+        {
+            Views = new Dictionary<string, MediumView>
+            {
+                ["A"] = new() { Elements = [new() { SemanticId = "save", Role = "link", Name = "Save" }] },
+                ["B"] = new() { Elements = [new() { SemanticId = "save", Role = "button", Name = "Save", Risk = MediumRisk.Write }] },
+            },
+        };
+        var e = MediumMerger.Enrich(manifest, Button("Guardar") with { AutomationId = "save" });
+        Assert.Equal("write", e.Risk); // the button entry, not view A's link
+    }
+
+    [Fact]
+    public void Nameless_container_with_colliding_id_never_binds()
+    {
+        // WPF derives AutomationId from x:Name — a Grid named "invoice.delete" must not
+        // receive the delete button's destructive metadata.
+        var container = new AccessibleElement
+        {
+            Ref = new ElementRef("r", "pid:1"),
+            Role = AccessibleRole.Group,
+            NativeRole = "Grid",
+            Name = null,
+            AutomationId = "invoice.delete",
+        };
+        var e = MediumMerger.Enrich(Manifest(), container);
+        Assert.Null(e.SemanticId);
+        Assert.Null(e.Risk);
+    }
+
+    [Fact]
+    public void Incompatible_id_candidate_falls_through_to_name_matching()
+    {
+        // The id points at a textbox entry, but the runtime element is a button with a
+        // matching name — the name path resolves it instead of a wrong id attach.
+        var e = MediumMerger.Enrich(Manifest(),
+            Button("Create Invoice") with { AutomationId = "invoice.customer" });
+        Assert.Equal("invoice.create", e.SemanticId);
+    }
+
+    [Fact]
+    public void AutomationId_is_ordinal_case_sensitive_and_falls_back_to_name()
+    {
+        // Wrong-case id does not match; the name fallback still resolves it.
+        var e = MediumMerger.Enrich(Manifest(),
+            Button("Create Invoice") with { AutomationId = "Invoice.Create" });
+        Assert.Equal("invoice.create", e.SemanticId);
+    }
+
+    [Fact]
+    public void Unrelated_automationId_does_not_block_name_matching()
+    {
+        var e = MediumMerger.Enrich(Manifest(),
+            Button("Customer") with { AutomationId = "textBox7", Role = AccessibleRole.Edit });
+        Assert.Equal("invoice.customer", e.SemanticId);
+    }
 }
