@@ -1,0 +1,196 @@
+/// The `medium_manifest` builder (issue #39): scans the package for members
+/// annotated with the Medium annotations and emits `telekinesis.medium.json`
+/// at the package root (`build_to: source`, so the manifest is versioned and
+/// reviewable). The Dart mirror of `Telekinesis.Medium.Generators`:
+/// deterministic inference, explicit annotations override, no LLM, no network.
+///
+/// Grouping: members of a class land in a view named after the class;
+/// top-level members land in the app-global `elements` list.
+library;
+
+import 'dart:convert';
+
+import 'package:analyzer/dart/constant/value.dart';
+import 'package:analyzer/dart/element/element.dart';
+import 'package:build/build.dart';
+import 'package:glob/glob.dart';
+
+import 'src/naming.dart';
+
+Builder mediumManifestBuilder(BuilderOptions options) =>
+    _MediumManifestBuilder(options);
+
+class _MediumManifestBuilder implements Builder {
+  final BuilderOptions options;
+  _MediumManifestBuilder(this.options);
+
+  @override
+  Map<String, List<String>> get buildExtensions => const {
+        r'$package$': ['telekinesis.medium.json'],
+      };
+
+  @override
+  Future<void> build(BuildStep buildStep) async {
+    final views = <String, List<Map<String, Object?>>>{};
+    final global = <Map<String, Object?>>[];
+
+    // Sort inputs so the emitted manifest is byte-stable across runs — asset
+    // enumeration order is not guaranteed, and this file is committed.
+    final inputs = await buildStep.findAssets(Glob('lib/**.dart')).toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+    for (final input in inputs) {
+      if (!await buildStep.resolver.isLibrary(input)) continue;
+      final library = await buildStep.resolver.libraryFor(input);
+      _scanLibrary(library, views, global);
+    }
+
+    if (views.isEmpty && global.isEmpty) return; // no Medium members → no manifest
+
+    // Semantic ids must be app-unique (MediumElement contract) — warn on clashes.
+    final seen = <String>{};
+    for (final element in [...views.values.expand((e) => e), ...global]) {
+      final id = element['semanticId'] as String;
+      if (!seen.add(id)) {
+        log.warning("Medium: duplicate semanticId '$id' — ids must be unique "
+            'within the application (override with @MediumSemanticId).');
+      }
+    }
+
+    final manifest = <String, Object?>{
+      'schemaVersion': '1.0',
+      'application':
+          options.config['application'] as String? ?? buildStep.inputId.package,
+      'views': {
+        for (final e in views.entries) e.key: {'elements': e.value},
+      },
+      'elements': global,
+    };
+    await buildStep.writeAsString(
+      AssetId(buildStep.inputId.package, 'telekinesis.medium.json'),
+      const JsonEncoder.withIndent('  ').convert(manifest),
+    );
+  }
+
+  void _scanLibrary(
+    LibraryElement library,
+    Map<String, List<Map<String, Object?>>> views,
+    List<Map<String, Object?>> global,
+  ) {
+    // Every container type scans — the C# generator catches members anywhere.
+    for (final type in [
+      ...library.classes,
+      ...library.mixins,
+      ...library.enums,
+      ...library.extensions,
+      ...library.extensionTypes,
+    ]) {
+      for (final member in [
+        ...type.fields,
+        ...type.getters,
+        ...type.setters,
+        ...type.methods,
+      ]) {
+        final element = _analyze(member);
+        if (element != null) {
+          final viewName = type.name;
+          // Unnamed extensions have no view identity — their members go global.
+          if (viewName == null || viewName.isEmpty) {
+            global.add(element);
+          } else {
+            views.putIfAbsent(viewName, () => []).add(element);
+          }
+        }
+      }
+    }
+    for (final member in [
+      ...library.topLevelVariables,
+      ...library.getters,
+      ...library.setters,
+      ...library.topLevelFunctions,
+    ]) {
+      final element = _analyze(member);
+      if (element != null) global.add(element);
+    }
+  }
+
+  Map<String, Object?>? _analyze(Element member) {
+    String? intent, role, semanticId;
+    var risk = 'unknown';
+    var requiresConfirmation = false;
+    var isMedium = false;
+
+    for (final annotation in member.metadata.annotations) {
+      final value = annotation.computeConstantValue();
+      final type = value?.type;
+      var typeName = type?.getDisplayString();
+      // Same rule as the C# generator's namespace check: only annotations from
+      // this package count, so unrelated classes that share a name are ignored.
+      var uri = type?.element?.library?.uri.toString();
+      if (value == null || typeName == null) {
+        // Constant evaluation failed. The C# generator detects the attribute
+        // syntactically and still emits the member with defaults — mirror that
+        // by falling back to the annotation's resolved element identity.
+        final el = annotation.element;
+        uri = el?.library?.uri.toString();
+        typeName = el?.enclosingElement?.name ?? el?.name;
+        if (typeName == 'mediumRequiresConfirmation') {
+          typeName = 'MediumRequiresConfirmation';
+        }
+        if (uri == null ||
+            !uri.startsWith('package:telekinesis_medium/') ||
+            !const {
+              'MediumIntent',
+              'MediumRiskOf',
+              'MediumRequiresConfirmation',
+              'MediumRole',
+              'MediumSemanticId',
+            }.contains(typeName)) {
+          continue;
+        }
+        if (typeName == 'MediumRequiresConfirmation') requiresConfirmation = true;
+        isMedium = true; // emit with defaults; the value itself is unavailable
+        continue;
+      }
+      if (uri == null || !uri.startsWith('package:telekinesis_medium/')) {
+        continue;
+      }
+      switch (typeName) {
+        case 'MediumIntent':
+          intent = value.getField('intent')?.toStringValue();
+        case 'MediumRiskOf':
+          risk = _riskName(value.getField('risk'));
+        case 'MediumRequiresConfirmation':
+          requiresConfirmation = true;
+        case 'MediumRole':
+          role = value.getField('role')?.toStringValue();
+        case 'MediumSemanticId':
+          semanticId = value.getField('semanticId')?.toStringValue();
+        default:
+          continue;
+      }
+      isMedium = true;
+    }
+    if (!isMedium) return null;
+
+    final name = member.name ?? '';
+    // ponytail: MEDIUM001 parity as a build log warning, not a hard failure.
+    if (risk == 'destructive' && !requiresConfirmation) {
+      log.warning(
+          "Medium: member '$name' is destructive but does not require confirmation (MEDIUM001).");
+    }
+    return {
+      'semanticId': semanticId ?? normalizeSemanticId(stripSuffix(name)),
+      'role': role ?? 'button',
+      'name': humanize(stripSuffix(name)),
+      if (intent != null) 'intent': intent,
+      'risk': risk,
+      'requiresConfirmation': requiresConfirmation,
+      'actions': ['invoke'],
+      'relationships': <Object?>[],
+      'metadata': <String, Object?>{},
+    };
+  }
+
+  String _riskName(DartObject? risk) =>
+      risk?.getField('_name')?.toStringValue() ?? 'unknown';
+}
