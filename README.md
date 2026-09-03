@@ -54,10 +54,13 @@ MCP client config:
   browser provider un-shadows page content by default; the vision tier is the built-in
   fallback provider). External plugins load only by explicit opt-in and are flagged by
   `doctor`. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
-- **Medium (coming)** — build accessible apps for *humans and AI agents*: an SDK +
-  semantic layer that lets an app enrich the accessibility tree with stable IDs, intent,
-  risk, and confirmation requirements, merged onto the same element model. See
-  [docs/MEDIUM.md](docs/MEDIUM.md).- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
+- **Medium** — build accessible apps for *humans and AI agents*: annotate your code
+  (C# attributes or the [`telekinesis_medium`](src/telekinesis_medium) Dart/Flutter
+  package) and a deterministic generator emits a `telekinesis.medium.json` sidecar that
+  enriches the runtime tree with stable semantic IDs, intent, risk, and confirmation
+  requirements — merged onto the same element model, no second automation stack.
+  Matching survives localization: set the platform automation id (Flutter's
+  `Semantics(identifier:)`) to the semantic id. See [docs/MEDIUM.md](docs/MEDIUM.md).- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
   element, `probe --overlay` draws live labeled boxes over a whole app, and
   `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
   input lands. Click-through, never steals focus. See [docs/XRAY-OVERLAY.md](docs/XRAY-OVERLAY.md).
@@ -104,8 +107,9 @@ scripted demo with caption output (see [demos/](demos/)); `telekinesis assert` g
 shell scripts a 0/1 exit probe for UI conditions. The **headless one-shot CLI**
 (`telekinesis apps|tree|find|read|focused|snapshot|launch|click|click-at|invoke|set-text|type|press`)
 makes every perception and action a single JSON-printing process — drive a desktop over
-plain SSH with no MCP client, including `launch` into the interactive session on
-Windows ([docs/HEADLESS-CLI.md](docs/HEADLESS-CLI.md)). For remote clients,
+plain SSH with no MCP client. On Windows the CLI handles the session-0 trap itself:
+`launch` starts GUI apps in the logged-on user's console session and every other verb
+auto-relays there transparently ([docs/HEADLESS-CLI.md](docs/HEADLESS-CLI.md)). For remote clients,
 `telekinesis serve --sse` speaks MCP over HTTP on localhost — read-only unless started
 with `--enable-actions`, with every action audit-logged to a file. Deployment posture
 and the credential-handoff rule (`fill_credential` — secrets never pass through the
