@@ -102,7 +102,7 @@ session of Telekinesis driving it (all native patterns, verified by read-back):
 `telekinesis run demos/<scenario>.json --enable-actions` executes a self-verifying
 scripted demo with caption output (see [demos/](demos/)); `telekinesis assert` gives
 shell scripts a 0/1 exit probe for UI conditions. The **headless one-shot CLI**
-(`telekinesis apps|tree|find|read|focused|snapshot|launch|click|invoke|set-text|type|press`)
+(`telekinesis apps|tree|find|read|focused|snapshot|launch|click|click-at|invoke|set-text|type|press`)
 makes every perception and action a single JSON-printing process — drive a desktop over
 plain SSH with no MCP client, including `launch` into the interactive session on
 Windows ([docs/HEADLESS-CLI.md](docs/HEADLESS-CLI.md)). For remote clients,

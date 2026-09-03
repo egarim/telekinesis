@@ -33,12 +33,15 @@ internal static class OneShot
             var i = Array.IndexOf(args, name);
             return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
         }
-        // Positional operands: everything after the verb that is not a --flag or its value.
+        // Positional operands. `launch` forwards everything (minus the gate flag)
+        // verbatim so the launched program's own --flags survive; other verbs strip
+        // known flags and their values. `--` always means "verbatim from here".
         var flagsWithValue = new HashSet<string> { "--app", "--depth", "--action", "--button", "--scope" };
         var operands = new List<string>();
         for (var i = 1; i < args.Length; i++)
         {
             if (args[i] == "--") { operands.AddRange(args[(i + 1)..]); break; }
+            if (verb == "launch") { if (args[i] != "--enable-actions") operands.Add(args[i]); continue; }
             if (flagsWithValue.Contains(args[i])) { i++; continue; }
             if (args[i].StartsWith("--")) continue;
             operands.Add(args[i]);
@@ -100,7 +103,9 @@ internal static class OneShot
         index < operands.Count ? operands[index] : throw new UsageException(usage);
 
     private static PointerButton ParseButton(string? s) =>
-        Enum.TryParse<PointerButton>(s, ignoreCase: true, out var b) ? b : PointerButton.Left;
+        s is null ? PointerButton.Left
+        : Enum.TryParse<PointerButton>(s, ignoreCase: true, out var b) ? b
+        : throw new UsageException($"--button {s} (expected left, middle or right)");
 
     private static int Print(object? data)
     {
@@ -146,7 +151,9 @@ internal static class OneShot
         Func<IAccessibilityBackend, ElementRef, Task<ActionResult>> act)
     {
         var target = await ResolveAsync(provider, query, app);
-        var backend = await provider.GetConnectedAsync();
+        // Act through the same app-scoped backend that resolved the target, so
+        // provider plugins (browser, Medium) keep owning the action path too.
+        var backend = await provider.GetForAppAsync(app);
         var result = await act(backend, target.Ref);
         AuditLog.Append("cli", $"{query} → [{target.Role}] \"{target.Name}\"", result.Success, result.Path.ToString());
         Console.WriteLine(JsonSerializer.Serialize(new
@@ -201,16 +208,22 @@ internal static class OneShot
             Role = role,
             NameContains = string.IsNullOrEmpty(name) ? null : name,
         };
-        if (scope is "chrome" or "page")
+        switch (scope)
         {
-            if (app is null) throw new ArgumentException($"--scope {scope} requires --app.");
-            if (scope == "chrome") q = q with { ExcludeDocumentContent = true };
-            else
-            {
+            case null or "window":
+                break;
+            case "chrome":
+                if (app is null) throw new ArgumentException("--scope chrome requires --app.");
+                q = q with { ExcludeDocumentContent = true };
+                break;
+            case "page":
+                if (app is null) throw new ArgumentException("--scope page requires --app.");
                 var doc = await BrowserPages.FindDocumentAsync(backend, app, titleContains: null, default)
                     ?? throw new InvalidOperationException(BrowserPages.NoDocumentHint);
                 q = q with { Within = doc.Ref };
-            }
+                break;
+            default:
+                throw new UsageException($"--scope {scope} (expected window, page or chrome)");
         }
         return Print(await backend.FindElementsAsync(q));
     }
@@ -274,9 +287,20 @@ internal static class OneShot
                 // SYSTEM privilege needed, works from a plain user SSH session for the
                 // same logged-on user. Upgrade to the token API if cross-user launch matters.
                 var task = $"telekinesis-launch-{Guid.NewGuid():N}";
-                var tr = string.Join(' ', new[] { exe }.Concat(exeArgs).Select(a => a.Contains(' ') ? $"\\\"{a}\\\"" : a));
-                await SchtasksAsync("/Create", "/F", "/TN", task, "/SC", "ONCE", "/ST", "00:00", "/TR", tr);
+                // /TR is a string schtasks re-parses; embedded quotes inside tokens are
+                // a quoting minefield across cmd/CreateProcess/TaskScheduler, so refuse
+                // them outright rather than store a malformed action.
+                if (operands.Any(a => a.Contains('"')))
+                    throw new InvalidOperationException("launch arguments must not contain '\"' characters.");
+                var tr = string.Join(' ',
+                    operands.Select(a => a.Any(char.IsWhiteSpace) || a.Length == 0 ? $"\"{a}\"" : a));
+                // /IT = run interactively in the logged-on user's session — the point of this path.
+                await SchtasksAsync("/Create", "/F", "/TN", task, "/SC", "ONCE", "/ST", "00:00", "/IT", "/TR", tr);
                 await SchtasksAsync("/Run", "/TN", task);
+                // /Run returns when the instance is queued, not started — deleting the
+                // definition immediately can drop it on a slow Task Scheduler engine.
+                // ponytail: fixed settle delay; poll the task's Last Run Time if it flakes.
+                await Task.Delay(2000);
                 await SchtasksAsync("/Delete", "/TN", task, "/F");
                 AuditLog.Append("cli-launch", tr, true, "schtasks");
                 return Print(new { ok = true, method = "schtasks", exe,
@@ -305,7 +329,9 @@ internal static class OneShot
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = System.Diagnostics.Process.Start(psi)!;
+        var drainOut = p.StandardOutput.ReadToEndAsync(); // drain both pipes or risk a full-buffer deadlock
         var err = await p.StandardError.ReadToEndAsync();
+        await drainOut;
         await p.WaitForExitAsync();
         if (p.ExitCode != 0)
             throw new InvalidOperationException($"schtasks {args[0]} failed ({p.ExitCode}): {err.Trim()}");

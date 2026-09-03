@@ -54,8 +54,9 @@ A GUI app started from a Windows SSH session lands in a non-interactive session:
 nothing renders and UIA sees nothing. `telekinesis launch` therefore routes through a
 one-shot Scheduled Task on Windows, which the Task Scheduler starts **in the logged-on
 user's console session**. No extra privileges needed when the SSH user is the
-logged-on user. On Linux/macOS it is a plain detached start (point `DISPLAY` at the
-desktop as usual).
+logged-on user. On Linux/macOS it is a plain child-process start — the CLI exits
+immediately, so the app is reparented and lives on (point `DISPLAY` at the desktop
+as usual).
 
 The process is started by the Task Scheduler, so no pid is returned — verify with:
 
@@ -68,6 +69,7 @@ telekinesis assert --name "My App" --timeout-ms 10000
 ```bash
 ssh winbox telekinesis launch 'C:\apps\collector.exe' --enable-actions
 ssh winbox telekinesis assert --name "Collector" --timeout-ms 15000
+ssh winbox telekinesis apps          # → find the app's id, e.g. pid:4242
 ssh winbox telekinesis snapshot --app pid:4242
 ssh winbox telekinesis set-text "Edit:Enrollment code" "ABC-123" --app pid:4242 --enable-actions
 ssh winbox telekinesis click "Button:Save" --app pid:4242 --enable-actions
