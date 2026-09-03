@@ -29,6 +29,13 @@ if (OperatingSystem.IsWindows())
 }
 #endif
 
+// telekinesis <verb> … → stateless one-shot CLI: JSON to stdout, exit code = status.
+// Shell-only automation (SSH, cron, CI) with no MCP client — see docs/HEADLESS-CLI.md.
+// Dispatched on the FIRST arg, and before the Contains() checks below, so operands
+// that happen to say "probe" etc. are never hijacked.
+if (OneShot.CanHandle(args.FirstOrDefault()))
+    return await OneShot.RunAsync(args);
+
 if (args.Contains("probe"))
     return await Probe.RunAsync(args);
 
@@ -114,6 +121,12 @@ if (args.FirstOrDefault() == "pilot-eval")
 // CI contract: exit 0 when the condition holds within the timeout, 1 otherwise.
 if (args.FirstOrDefault() == "assert")
 {
+    // Same wrong-session trap as the one-shot verbs (docs/HEADLESS-CLI.md).
+    if (WindowsSession.NeedsRelay())
+    {
+        Console.Error.WriteLine("[telekinesis] non-interactive session detected — relaying via the console session.");
+        return await OneShot.RelayAsync(args);
+    }
     string? Opt(string name)
     {
         var i = Array.IndexOf(args, name);
