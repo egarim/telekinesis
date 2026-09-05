@@ -170,16 +170,23 @@ public static class PilotLoop
         if (readouts.Count > 0)
         {
             sb.AppendLine("readouts:");
-            foreach (var r in readouts) sb.Append("  ").AppendLine(r);
+            foreach (var r in readouts) sb.Append("  ").AppendLine(Clean(r));
         }
         sb.AppendLine("candidates (id role \"label\" [=value]):");
         foreach (var c in candidates)
             sb.Append("  ").Append(c.Id).Append(' ').Append(c.Role)
-              .Append(" \"").Append(c.Label).Append('"')
-              .AppendLine(string.IsNullOrEmpty(c.Value) ? "" : $" ={c.Value}");
-        if (feedback is not null) sb.Append("previous: ").AppendLine(feedback);
+              .Append(" \"").Append(Clean(c.Label)).Append('"')
+              .AppendLine(string.IsNullOrEmpty(c.Value) ? "" : $" ={Clean(c.Value)}");
+        if (feedback is not null) sb.Append("previous: ").AppendLine(Clean(feedback));
         return sb.ToString();
     }
+
+    // Keep the terse line format unambiguous: embedded quotes are escaped and
+    // newlines/tabs collapsed to spaces so a control label can't break a record
+    // boundary or the quoted-label field (issue #10 / PR #47 review).
+    private static string Clean(string s) => s
+        .Replace("\\", "\\\\").Replace("\"", "\\\"")
+        .Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
 
     private static string Describe(PilotAction a, IReadOnlyList<Candidate> candidates)
     {
