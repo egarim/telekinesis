@@ -70,4 +70,12 @@
           Visible="false" />
   </ItemGroup>
 
+  <!-- WPF's System.Windows.Automation fails its type initializer under single-file
+       publish (issue #26, reproduced live on Windows ARM64) — fail fast at publish
+       time instead of shipping a binary whose UIA backend cannot start. -->
+  <Target Name="BlockSingleFileWindowsPublish" BeforeTargets="Publish"
+          Condition="'$(PublishSingleFile)' == 'true' AND $(TargetFramework.Contains('-windows'))">
+    <Error Text="Single-file publish is not supported for the Windows head: System.Windows.Automation cannot initialize inside a single-file bundle (issue #26). Publish as a folder (omit -p:PublishSingleFile=true) — scripts/release.sh does this." />
+  </Target>
+
 </Project>
