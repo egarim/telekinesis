@@ -14,6 +14,7 @@ public static class Repl
     public static async Task<int> RunAsync(string[] args)
     {
         var actionsEnabled = args.Contains("--enable-actions");
+        using var consoles = new ConsoleSessionService();
 
         await using var provider = new BackendProvider();
         IAccessibilityBackend backend;
@@ -28,7 +29,8 @@ public static class Repl
         }
         Console.WriteLine($"Connected via {backend.Name}. Commands: apps | tree <app> [depth] | " +
                           "find <app> <name> | click <app> <name> | settext <app> <name> <text> | " +
-                          "setvalue <app> <name> <num> | quit");
+                          "setvalue <app> <name> <num> | con-open [shell] | con-write <id> <text> | " +
+                          "con-read <id> | con-close <id> | quit");
         if (!actionsEnabled) Console.WriteLine("(read-only: start with --enable-actions to allow click/settext/setvalue)");
 
         string? line;
@@ -113,6 +115,31 @@ public static class Repl
                         Console.WriteLine($"  [{target.Role}] \"{target.Name}\" → success={r.Success} path={r.Path} {r.Error}");
                         break;
                     }
+                    case "con-open":
+                    {
+                        if (!RequireActions(actionsEnabled)) break;
+                        var entry = consoles.Open(parts.Length >= 2 ? string.Join(' ', parts[1..]) : null, 120, 30);
+                        await Task.Delay(400);
+                        Console.WriteLine($"  {entry.Id} ({entry.Session.Shell})");
+                        Console.WriteLine(Indent(entry.Screen.Render()));
+                        break;
+                    }
+                    case "con-write" when parts.Length >= 3:
+                    {
+                        if (!RequireActions(actionsEnabled)) break;
+                        var entry = consoles.Get(parts[1]);
+                        entry.Session.Write(string.Join(' ', parts[2..]) + "\r");
+                        await Task.Delay(400);
+                        Console.WriteLine(Indent(entry.Screen.Render(12)));
+                        break;
+                    }
+                    case "con-read" when parts.Length >= 2:
+                        Console.WriteLine(Indent(consoles.Get(parts[1]).Screen.Render()));
+                        break;
+                    case "con-close" when parts.Length >= 2:
+                        consoles.Close(parts[1]);
+                        Console.WriteLine("  closed");
+                        break;
                     default:
                         Console.WriteLine("  ? unknown or incomplete command");
                         break;
@@ -124,6 +151,9 @@ public static class Repl
         }
         return 0;
     }
+
+    private static string Indent(string screen) =>
+        string.Join('\n', screen.Split('\n').Select(l => "  | " + l));
 
     /// <summary>Split on spaces, honoring double quotes: settext pid:1 "Incident date" 2026-08-20</summary>
     private static string[] Tokenize(string line)
