@@ -65,7 +65,8 @@ MCP client config:
   the platform automation id (Flutter's `Semantics(identifier:)`) to the semantic id.
   Blazor is supported via `Telekinesis.Medium.Blazor` (note: Blazor *Server* circuits
   can publish semantics but resist synthetic input — use WebAssembly to be driven).
-  See [docs/MEDIUM.md](docs/MEDIUM.md).- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
+  See [docs/MEDIUM.md](docs/MEDIUM.md).
+- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
   element, `probe --overlay` draws live labeled boxes over a whole app, and
   `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
   input lands. Click-through, never steals focus. See [docs/XRAY-OVERLAY.md](docs/XRAY-OVERLAY.md).

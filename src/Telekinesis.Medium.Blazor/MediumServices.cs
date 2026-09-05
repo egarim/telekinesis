@@ -31,8 +31,10 @@ public static class MediumServices
         string path = "/telekinesis.medium.json",
         bool alsoInProduction = false)
     {
+        // Fail closed: if the environment can't be resolved, treat it as NOT
+        // Development so a missing IHostEnvironment never silently exposes the endpoint.
         var env = endpoints.ServiceProvider.GetService<IHostEnvironment>();
-        if (!alsoInProduction && env is not null && !env.IsDevelopment())
+        if (!alsoInProduction && env?.IsDevelopment() != true)
             return endpoints;
 
         endpoints.MapGet(path, (MediumManifestBuilder builder) =>
