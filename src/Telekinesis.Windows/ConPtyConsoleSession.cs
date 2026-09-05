@@ -29,6 +29,9 @@ public sealed class ConPtyConsoleSession : IConsoleSession
             throw new Win32Exception();
         var hr = CreatePseudoConsole(new COORD { X = (short)cols, Y = (short)rows }, _inRead, _outWrite, 0, out _pty);
         if (hr != 0) throw new Win32Exception(hr, "CreatePseudoConsole failed.");
+        // NOTE: this ConPTY build needs the parent to KEEP its copy of the output
+        // write end open — closing it here EOFs the output pipe immediately (zero
+        // bytes). The parent's copies are released in Dispose() instead.
 
         // Attribute list carrying the pseudoconsole to CreateProcess.
         var size = nint.Zero;
@@ -43,6 +46,13 @@ public sealed class ConPtyConsoleSession : IConsoleSession
         si.lpAttributeList = attrs;
         try
         {
+            // ponytail: canonical ConPTY spawn (matches Microsoft's EchoCon sample:
+            // EXTENDED_STARTUPINFO_PRESENT, bInheritHandles=false, no std-handle
+            // redirection — the pseudoconsole attribute supplies the child's console).
+            // KNOWN LIMITATION (#46): on Windows 11 ARM64 build 26200 the child does
+            // not bind to the pseudoconsole and falls back to the parent console;
+            // reproduced identically in an interactive (session 1) launch, so it is a
+            // platform/ConPTY issue below this P/Invoke, not the session-0 trap.
             if (!CreateProcess(null, shell, 0, 0, false, ExtendedStartupinfoPresent,
                     0, null, ref si, out var pi))
                 throw new Win32Exception();
@@ -88,7 +98,7 @@ public sealed class ConPtyConsoleSession : IConsoleSession
         ClosePseudoConsole(_pty);
         if (IsAlive) TerminateProcess(_process, 0);
         CloseHandle(_process);
-        _input.Dispose();
+        _input.Dispose();     // owns _inWrite
         _inRead.Dispose(); _outWrite.Dispose(); _outRead.Dispose();
     }
 
@@ -97,17 +107,21 @@ public sealed class ConPtyConsoleSession : IConsoleSession
 
     [StructLayout(LayoutKind.Sequential)] private struct COORD { public short X, Y; }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    // Blittable layout (IntPtr, not string) so `ref STARTUPINFOEX` is a direct
+    // pointer to this struct — no temporary marshalling copy that could drop
+    // lpAttributeList. Correct-by-construction; note it did NOT by itself resolve
+    // the #46 binding failure, which points below the P/Invoke layer.
+    [StructLayout(LayoutKind.Sequential)]
     private struct STARTUPINFO
     {
         public int cb;
-        public string? lpReserved, lpDesktop, lpTitle;
+        public nint lpReserved, lpDesktop, lpTitle;
         public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
         public short wShowWindow, cbReserved2;
         public nint lpReserved2, hStdInput, hStdOutput, hStdError;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    [StructLayout(LayoutKind.Sequential)]
     private struct STARTUPINFOEX { public STARTUPINFO StartupInfo; public nint lpAttributeList; }
 
     [StructLayout(LayoutKind.Sequential)]
