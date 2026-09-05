@@ -54,13 +54,18 @@ MCP client config:
   browser provider un-shadows page content by default; the vision tier is the built-in
   fallback provider). External plugins load only by explicit opt-in and are flagged by
   `doctor`. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
-- **Medium** — build accessible apps for *humans and AI agents*: annotate your code
-  (C# attributes or the [`telekinesis_medium`](src/telekinesis_medium) Dart/Flutter
-  package) and a deterministic generator emits a `telekinesis.medium.json` sidecar that
-  enriches the runtime tree with stable semantic IDs, intent, risk, and confirmation
-  requirements — merged onto the same element model, no second automation stack.
-  Matching survives localization: set the platform automation id (Flutter's
-  `Semantics(identifier:)`) to the semantic id. See [docs/MEDIUM.md](docs/MEDIUM.md).- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
+- **Medium** — build accessible apps for *humans and AI agents*: annotate your code and
+  a deterministic generator emits a `telekinesis.medium.json` sidecar that enriches the
+  runtime tree with stable semantic IDs, intent, risk, and confirmation requirements —
+  merged onto the same element model, no second automation stack. **Flutter apps are
+  first-class**: the [`telekinesis_medium`](https://pub.dev/packages/telekinesis_medium)
+  package on pub.dev mirrors the C# attributes with a `build_runner` generator, and
+  Flutter Windows surfaces the tree via UIA (one line:
+  `SemanticsBinding.instance.ensureSemantics()`). Matching survives localization: set
+  the platform automation id (Flutter's `Semantics(identifier:)`) to the semantic id.
+  Blazor is supported via `Telekinesis.Medium.Blazor` (note: Blazor *Server* circuits
+  can publish semantics but resist synthetic input — use WebAssembly to be driven).
+  See [docs/MEDIUM.md](docs/MEDIUM.md).- **X-ray overlay** â€” see what the AI sees, on the real desktop: `highlight` boxes an
   element, `probe --overlay` draws live labeled boxes over a whole app, and
   `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
   input lands. Click-through, never steals focus. See [docs/XRAY-OVERLAY.md](docs/XRAY-OVERLAY.md).

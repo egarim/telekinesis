@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Telekinesis.Medium.Blazor;
 
@@ -16,12 +17,24 @@ public static class MediumServices
 
     /// <summary>
     /// Serve the Medium manifest at <paramref name="path"/> (default
-    /// <c>/telekinesis.medium.json</c>). Call this on the endpoint route builder.
-    /// The manifest is read-only/advisory — exposing it grants no powers to a client
-    /// that Telekinesis itself does not already have.
+    /// <c>/telekinesis.medium.json</c>) — a DEBUG/TOOLING aid, not the runtime
+    /// contract (issue #36). Agents read Medium from the accessibility tree
+    /// (<see cref="MediumDomMapper"/> attributes merged by the enriching backend);
+    /// the manifest is only a serialized rendering of the same metadata for humans
+    /// and tooling. By default the endpoint is therefore mapped ONLY in the
+    /// Development environment; pass <paramref name="alsoInProduction"/> = true to
+    /// deliberately expose it elsewhere (it is advisory-only and grants no powers,
+    /// but it is public surface your app does not need).
     /// </summary>
-    public static IEndpointRouteBuilder MapMediumManifest(this IEndpointRouteBuilder endpoints, string path = "/telekinesis.medium.json")
+    public static IEndpointRouteBuilder MapMediumManifest(
+        this IEndpointRouteBuilder endpoints,
+        string path = "/telekinesis.medium.json",
+        bool alsoInProduction = false)
     {
+        var env = endpoints.ServiceProvider.GetService<IHostEnvironment>();
+        if (!alsoInProduction && env is not null && !env.IsDevelopment())
+            return endpoints;
+
         endpoints.MapGet(path, (MediumManifestBuilder builder) =>
             Results.Json(builder.Build(), MediumJson.Options));
         return endpoints;
