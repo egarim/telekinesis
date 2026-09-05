@@ -110,3 +110,18 @@ Validated live against Calculator, Windows 11 Notepad, and a WinForms test app:
 - Injected `click` / `type_text` / `press_keys` with effect verification
 - `get_focused` + `wait_for_event("focus-changed")`
 - `PasswordEdit`/`Protected` masking; `StaleElementException` on dead handles
+
+
+## Single-file publish is not supported on Windows
+
+`System.Windows.Automation` (the managed UIA client, part of WPF) fails its type
+initializer inside a `PublishSingleFile=true` bundle — `doctor` reports the
+`uia-root` check failing with "The type initializer for
+'System.Windows.Automation.CacheRequest' threw an exception" (issue #26; reproduced
+live on Windows ARM64, and present in the shipped v0.6.0/v0.7.0 single-file zips).
+
+The build now fails fast if you try. Supported Windows paths, all verified live:
+
+- `dotnet tool install -g Telekinesis` (framework-dependent — the recommended install)
+- folder publish: `dotnet publish -f net10.0-windows -r win-x64 --self-contained`
+  (what `scripts/release.sh` ships in the release zips since v0.8.0)
