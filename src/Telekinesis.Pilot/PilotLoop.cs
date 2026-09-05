@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using Telekinesis.Abstractions;
 
 namespace Telekinesis.Pilot;
@@ -165,8 +163,8 @@ public static class PilotLoop
         IReadOnlyList<string> readouts, string? feedback)
     {
         var sb = new System.Text.StringBuilder();
-        sb.Append("goal: ").AppendLine(goal);
-        sb.Append("screen: ").AppendLine(screen);
+        sb.Append("goal: ").AppendLine(Clean(goal));
+        sb.Append("screen: ").AppendLine(Clean(screen));
         if (readouts.Count > 0)
         {
             sb.AppendLine("readouts:");
