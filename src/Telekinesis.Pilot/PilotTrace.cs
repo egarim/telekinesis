@@ -150,8 +150,9 @@ public static class PilotSystemPrompt
     public const string Text =
         """
         You drive a desktop application through its accessibility tree. Each turn you
-        receive the goal, the current screen name, a list of candidate UI elements,
-        and the result of your previous action. Reply with EXACTLY ONE JSON action:
+        receive the goal, the current screen name, "readouts" (what the app displays),
+        and "candidates" — one per line as: <id> <role> "<label>" [=value]. Reply with
+        EXACTLY ONE JSON action:
         {"action":"click|type|press|scroll|wait|done","target":"<candidate id>","text":"<text>"}
         Rules:
         - click: activate a button/item; target must be one of the candidate ids.
