@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using Telekinesis.Abstractions;
 
 namespace Telekinesis.Pilot;
@@ -153,25 +151,40 @@ public static class PilotLoop
         }
     }
 
+    /// <summary>
+    /// Compact text encoding of the turn (issue #10 / token optimization): the
+    /// per-step cost is CPU prefill of this message, which scales with its token
+    /// count. A verbose JSON array of candidates cost ~1000 tokens/step; this
+    /// line format ("c1 button "Seven"", value only when present) is ~5-6 tokens
+    /// per candidate — the same information at roughly a fifth the prefill. The
+    /// model still replies with the JSON action schema; only the INPUT shrinks.
+    /// </summary>
     private static string BuildUserMessage(string goal, string screen, IReadOnlyList<Candidate> candidates,
         IReadOnlyList<string> readouts, string? feedback)
     {
-        var payload = new JsonObject
+        var sb = new System.Text.StringBuilder();
+        sb.Append("goal: ").AppendLine(Clean(goal));
+        sb.Append("screen: ").AppendLine(Clean(screen));
+        if (readouts.Count > 0)
         {
-            ["goal"] = goal,
-            ["screen"] = screen,
-            ["readouts"] = new JsonArray(readouts.Select(r => (JsonNode)JsonValue.Create(r)).ToArray()),
-            ["candidates"] = new JsonArray(candidates.Select(c => (JsonNode)new JsonObject
-            {
-                ["id"] = c.Id,
-                ["role"] = c.Role,
-                ["label"] = c.Label,
-                ["value"] = c.Value,
-            }).ToArray()),
-        };
-        if (feedback is not null) payload["previous"] = feedback;
-        return payload.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
+            sb.AppendLine("readouts:");
+            foreach (var r in readouts) sb.Append("  ").AppendLine(Clean(r));
+        }
+        sb.AppendLine("candidates (id role \"label\" [=value]):");
+        foreach (var c in candidates)
+            sb.Append("  ").Append(c.Id).Append(' ').Append(c.Role)
+              .Append(" \"").Append(Clean(c.Label)).Append('"')
+              .AppendLine(string.IsNullOrEmpty(c.Value) ? "" : $" ={Clean(c.Value)}");
+        if (feedback is not null) sb.Append("previous: ").AppendLine(Clean(feedback));
+        return sb.ToString();
     }
+
+    // Keep the terse line format unambiguous: embedded quotes are escaped and
+    // newlines/tabs collapsed to spaces so a control label can't break a record
+    // boundary or the quoted-label field (issue #10 / PR #47 review).
+    private static string Clean(string s) => s
+        .Replace("\\", "\\\\").Replace("\"", "\\\"")
+        .Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
 
     private static string Describe(PilotAction a, IReadOnlyList<Candidate> candidates)
     {
