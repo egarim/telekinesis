@@ -213,7 +213,10 @@ Telekinesis without any scraping.
 - **`MediumManifestBuilder`** — a DI singleton that collects `MediumElement`s (app-global
   or per-view), idempotent by semantic id (last wins), and `Build()`s a `MediumManifest`.
 - **`AddTelekinesisMedium()`** registers it; **`MapMediumManifest()`** maps
-  `/telekinesis.medium.json` to the latest manifest.
+  `/telekinesis.medium.json` to the latest manifest — **Development environment only
+  by default** (issue #36): the manifest is a debug/tooling rendering, not the runtime
+  contract; agents read Medium from the accessibility tree. Pass
+  `alsoInProduction: true` only if you deliberately want the endpoint public.
 - **`MediumDomMapper`** — maps a rendered DOM element (tag + ARIA + `data-medium-*`) onto
   Medium semantics (role, accessible name, deterministic semantic id), so common controls
   (buttons, text inputs, checkboxes, links, lists, selects) are recognized automatically.
@@ -228,6 +231,20 @@ In both, the movie form's commands are annotated with `[Medium*]`, so the build-
 generator autogenerates semantics (`create.movie`, `update.movie`, `movie.delete`) that
 enrich the same controls Telekinesis already perceives; each app writes the sidecar
 `telekinesis.medium.json` next to its executable for Telekinesis to merge.
+
+### ⚠️ Blazor Server cannot be DRIVEN — publish from it, act on WebAssembly
+
+A reproducible limitation (issue #36): a Blazor **Server** interactive circuit ignores
+every form of synthetic input — SendInput, UIA `SetValue`/invoke, raw CDP key events,
+even native `form.submit()`. The DOM may update visually, but the component model lives
+on the server behind the circuit and never sees the change — the worst outcome for an
+agent: the UI *looks* accepted while app state did not move. The identical events work
+the moment the same app runs as Blazor **WebAssembly** (client-side binding).
+
+Practical guidance: a Server app can still *publish* Medium metadata (tree attributes
+and the manifest), but for an agent to *act*, render interactively on WebAssembly — or
+drive through a circuit-aware driver (e.g. Playwright) instead of the accessibility
+tree.
 
 ---
 
