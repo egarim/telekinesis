@@ -165,10 +165,11 @@ if (args.FirstOrDefault() == "serve")
     web.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
     web.Services.AddSingleton<BackendProvider>();
     web.Services.AddSingleton<VisionMemoryService>();
+    web.Services.AddSingleton<ConsoleSessionService>();
     var sse = web.Services.AddMcpServer().WithHttpTransport()
         .WithTools([typeof(PerceptionTools), typeof(AssertTools), .. ProviderRegistry.Default.TrustedToolTypes]);
     if (enableActions)
-        sse.WithTools([typeof(ActionTools), typeof(CredentialTools), .. ProviderRegistry.Default.ExternalToolTypes]);
+        sse.WithTools([typeof(ActionTools), typeof(CredentialTools), typeof(ConsoleTools), .. ProviderRegistry.Default.ExternalToolTypes]);
 
     var app = web.Build();
     Microsoft.AspNetCore.Builder.McpEndpointRouteBuilderExtensions.MapMcp(app);
@@ -311,6 +312,7 @@ builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
 builder.Services.AddSingleton<BackendProvider>();
 builder.Services.AddSingleton<VisionMemoryService>();
+builder.Services.AddSingleton<ConsoleSessionService>();
 
 var mcp = builder.Services
     .AddMcpServer()
@@ -318,7 +320,7 @@ var mcp = builder.Services
     .WithTools([typeof(PerceptionTools), typeof(AssertTools), .. ProviderRegistry.Default.TrustedToolTypes]);
 
 if (!readOnly)
-    mcp.WithTools([typeof(ActionTools), typeof(CredentialTools), .. ProviderRegistry.Default.ExternalToolTypes]);
+    mcp.WithTools([typeof(ActionTools), typeof(CredentialTools), typeof(ConsoleTools), .. ProviderRegistry.Default.ExternalToolTypes]);
 
 await builder.Build().RunAsync();
 return 0;
