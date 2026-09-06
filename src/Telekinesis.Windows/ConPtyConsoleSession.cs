@@ -17,6 +17,7 @@ public sealed class ConPtyConsoleSession : IConsoleSession
     private readonly nint _pty;
     private readonly nint _process;
     private readonly FileStream _input;
+    private int _disposed;
     private readonly SafeFileHandle _inRead, _inWrite, _outRead, _outWrite;
 
     public string Shell { get; }
@@ -28,7 +29,7 @@ public sealed class ConPtyConsoleSession : IConsoleSession
         if (!CreatePipe(out _inRead, out _inWrite, 0, 0) || !CreatePipe(out _outRead, out _outWrite, 0, 0))
             throw new Win32Exception();
         var hr = CreatePseudoConsole(new COORD { X = (short)cols, Y = (short)rows }, _inRead, _outWrite, 0, out _pty);
-        if (hr != 0) throw new Win32Exception(hr, "CreatePseudoConsole failed.");
+        if (hr != 0) { CleanupPartial(); throw new Win32Exception(hr, "CreatePseudoConsole failed."); }
         // NOTE: this ConPTY build needs the parent to KEEP its copy of the output
         // write end open — closing it here EOFs the output pipe immediately (zero
         // bytes). The parent's copies are released in Dispose() instead.
@@ -39,7 +40,11 @@ public sealed class ConPtyConsoleSession : IConsoleSession
         var attrs = Marshal.AllocHGlobal(size);
         if (!InitializeProcThreadAttributeList(attrs, 1, 0, ref size) ||
             !UpdateProcThreadAttribute(attrs, 0, ProcThreadAttributePseudoconsole, _pty, nint.Size, 0, 0))
+        {
+            Marshal.FreeHGlobal(attrs);
+            CleanupPartial();
             throw new Win32Exception();
+        }
 
         var si = new STARTUPINFOEX();
         si.StartupInfo.cb = Marshal.SizeOf<STARTUPINFOEX>();
@@ -55,7 +60,12 @@ public sealed class ConPtyConsoleSession : IConsoleSession
             // platform/ConPTY issue below this P/Invoke, not the session-0 trap.
             if (!CreateProcess(null, shell, 0, 0, false, ExtendedStartupinfoPresent,
                     0, null, ref si, out var pi))
+            {
+                // attrs are released by the finally below; free the PC + pipes here.
+                ClosePseudoConsole(_pty);
+                CleanupPartial();
                 throw new Win32Exception();
+            }
             _process = pi.hProcess;
             CloseHandle(pi.hThread);
         }
@@ -91,8 +101,15 @@ public sealed class ConPtyConsoleSession : IConsoleSession
     public void Resize(int cols, int rows) =>
         ResizePseudoConsole(_pty, new COORD { X = (short)cols, Y = (short)rows });
 
+    /// <summary>Release the pipe handles when the ctor fails before the streams exist.</summary>
+    private void CleanupPartial()
+    {
+        _inRead.Dispose(); _inWrite.Dispose(); _outRead.Dispose(); _outWrite.Dispose();
+    }
+
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return; // idempotent
         // Closing the pseudoconsole detaches the child's terminal; terminate the
         // child too so `console_close` never leaves an orphan shell behind.
         ClosePseudoConsole(_pty);

@@ -17,9 +17,11 @@ public sealed class ConsoleSessionService : IDisposable
 
     private readonly ConcurrentDictionary<string, Entry> _sessions = new();
     private int _next;
+    private volatile bool _disposed;
 
     public Entry Open(string? shell, int cols, int rows)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         cols = cols <= 0 ? 120 : cols;
         rows = rows <= 0 ? 30 : rows;
         shell = string.IsNullOrWhiteSpace(shell)
@@ -51,6 +53,12 @@ public sealed class ConsoleSessionService : IDisposable
 #endif
         var entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
         _sessions[entry.Id] = entry;
+        // If Dispose() raced ahead of the insert, this session would leak — reap it now.
+        if (_disposed && _sessions.TryRemove(entry.Id, out _))
+        {
+            session.Dispose();
+            throw new ObjectDisposedException(nameof(ConsoleSessionService));
+        }
         return entry;
     }
 
@@ -63,14 +71,18 @@ public sealed class ConsoleSessionService : IDisposable
 
     public void Close(string id)
     {
+        // TryRemove makes exactly one caller win the entry, so Close/Dispose never
+        // double-dispose the same session.
         if (_sessions.TryRemove(id, out var e)) e.Session.Dispose();
         else throw new KeyNotFoundException($"No console session '{id}'.");
     }
 
     public void Dispose()
     {
-        foreach (var e in _sessions.Values) e.Session.Dispose();
-        _sessions.Clear();
+        _disposed = true;
+        foreach (var id in _sessions.Keys)
+            if (_sessions.TryRemove(id, out var e))
+                e.Session.Dispose();
     }
 }
 

@@ -62,6 +62,17 @@ public class TerminalScreenTests
         => Assert.Equal("c", Fed("a\r\nb\r\nc").Render(lastLines: 1));
 
     [Fact]
+    public void Resize_to_tiny_or_zero_does_not_crash_subsequent_feed()
+    {
+        var screen = new TerminalScreen(20, 5);
+        screen.Resize(0, 0);   // clamped to 2x2, grid must match dims
+        screen.Resize(-4, -4); // negatives clamped too
+        var bytes = Encoding.UTF8.GetBytes("abcdefghij\r\nklmno"); // overflows a 2-wide row
+        screen.Feed(bytes, bytes.Length);   // must not IndexOutOfRange
+        Assert.NotNull(screen.Render());
+    }
+
+    [Fact]
     public void Split_escape_sequences_across_chunks_still_parse()
     {
         var screen = new TerminalScreen(20, 5);

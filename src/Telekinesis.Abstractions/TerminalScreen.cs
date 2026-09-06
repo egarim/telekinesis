@@ -48,6 +48,10 @@ public sealed class TerminalScreen
 
     public void Resize(int cols, int rows)
     {
+        // Clamp BEFORE allocating so the grid dimensions always match _cols/_rows —
+        // a 1x1 (or negative) resize must not leave a grid smaller than recorded.
+        cols = Math.Max(cols, 2);
+        rows = Math.Max(rows, 2);
         lock (_gate)
         {
             // ponytail: rebuild and copy what fits; full reflow is a TUI luxury the
@@ -56,8 +60,8 @@ public sealed class TerminalScreen
             for (var y = 0; y < Math.Min(rows, _rows); y++)
                 Array.Copy(_grid[y], g[y], Math.Min(cols, _cols));
             _grid = g;
-            _cols = Math.Max(cols, 2);
-            _rows = Math.Max(rows, 2);
+            _cols = cols;
+            _rows = rows;
             _cx = Math.Min(_cx, _cols - 1);
             _cy = Math.Min(_cy, _rows - 1);
         }
@@ -65,10 +69,14 @@ public sealed class TerminalScreen
 
     public void Feed(byte[] data, int count)
     {
-        var chars = new char[_utf8.GetCharCount(data, 0, count, flush: false)];
-        _utf8.GetChars(data, 0, count, chars, 0, flush: false);
+        // The UTF-8 Decoder is stateful (carries partial multibyte sequences across
+        // chunks), so it must be used under the same lock — otherwise concurrent
+        // Feed() calls corrupt its state. In practice one PTY reader feeds a screen,
+        // but the lock makes the "thread-safe" claim hold.
         lock (_gate)
         {
+            var chars = new char[_utf8.GetCharCount(data, 0, count, flush: false)];
+            _utf8.GetChars(data, 0, count, chars, 0, flush: false);
             foreach (var c in chars) FeedChar(c);
         }
     }
@@ -88,13 +96,15 @@ public sealed class TerminalScreen
                 return;
             case Mode.Csi:
                 if (c >= '@' && c <= '~') { ApplyCsi(_seq.ToString(), c); _seq.Clear(); _mode = Mode.Text; }
-                else _seq.Append(c);
+                else if (_seq.Length < 64) _seq.Append(c); // bound malformed/unterminated sequences
+                else { _seq.Clear(); _mode = Mode.Text; }
                 return;
             case Mode.Osc:
                 // OSC ends with BEL or ST (ESC \) — titles/hyperlinks, all dropped.
                 if (c == '\a') { _seq.Clear(); _mode = Mode.Text; }
                 else if (c == '\\' && _seq.Length > 0 && _seq[^1] == '\x1b') { _seq.Clear(); _mode = Mode.Text; }
-                else _seq.Append(c);
+                else if (_seq.Length < 256) _seq.Append(c); // bound an unterminated OSC (titles/hyperlinks)
+                else { _seq.Clear(); _mode = Mode.Text; }
                 return;
         }
 
