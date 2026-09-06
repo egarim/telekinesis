@@ -437,9 +437,11 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         var cy = bounds.Y + bounds.Height / 2;
         // The a11y tree lists occluded elements as Visible; injecting a click at a
         // covered center would hit whatever is on top. Refuse rather than mis-click.
-        if (!PointHitsTargetWindow(el, cx, cy))
+        if (Occluder(el, cx, cy) is { } coveredBy)
             return ActionResult.Failed(ActionPath.InputInjection,
-                "Element is covered by another window at its click point; a pointer click would hit the wrong target. Bring it to the foreground, or use the native action (invoke/set_value) which does not depend on being on top.");
+                $"Element is covered by {coveredBy} at its click point; a pointer click would hit the wrong "
+                + "target. Bring it to the foreground, or use the native action (invoke/set_value) which does "
+                + "not depend on being on top.");
         try
         {
             FlashIntent(bounds, "click");
@@ -922,30 +924,77 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
 
     private struct POINT { public int X, Y; }
 
-    /// <summary>True if a pointer click at (x,y) would land on the target element's own
-    /// top-level window, rather than something covering it. UIA reports occluded elements
-    /// as Visible with plausible bounds, so an injected click can hit whatever is on top;
-    /// this guards the injection fallback. Coarse (window-level) but fast and reliable.</summary>
-    private static bool PointHitsTargetWindow(AutomationElement el, int x, int y)
+    /// <summary>
+    /// Returns a short description of what actually sits at (x,y) when it is NOT the
+    /// target element (nor an ancestor/descendant of it) — i.e. the target is occluded —
+    /// or null when a click there would land on the target. UIA reports occluded elements
+    /// as Visible with plausible bounds, so this guards the injection fallback against
+    /// mis-clicks. Element-level via <see cref="AutomationElement.FromPoint"/> so it also
+    /// catches occlusion WITHIN one window (modal overlays in WPF/WinUI/Uno apps, which
+    /// are a single HWND — the coarse window check misses those); falls back to a
+    /// window-level check when FromPoint can't resolve.
+    /// </summary>
+    private static string? Occluder(AutomationElement el, int x, int y)
     {
         try
         {
+            var pt = new System.Windows.Point(x, y);
+            var atPoint = AutomationElement.FromPoint(pt);
+            if (atPoint is not null)
+            {
+                if (SameRuntimeIdOrRelated(atPoint, el)) return null; // hits the target
+                var name = TryGet(() => atPoint.Current.Name);
+                var type = TryGet(() => atPoint.Current.LocalizedControlType) ?? "element";
+                return string.IsNullOrEmpty(name) ? $"another {type}" : $"the {type} \"{name}\"";
+            }
+        }
+        catch { /* fall through to the window-level check */ }
+
+        // Fallback: window-level. Only fires when FromPoint failed entirely.
+        try
+        {
             var hwndAtPoint = WindowFromPoint(new POINT { X = x, Y = y });
-            if (hwndAtPoint == 0) return false;
-            // Most UIA elements are windowless; walk up the control view until an
-            // ancestor exposes a real HWND, then compare root windows.
+            if (hwndAtPoint == 0) return "another window";
             nint targetHwnd = 0;
             var node = el;
             while (node is not null && targetHwnd == 0)
             {
-                var handle = node; // capture for the lambda
+                var handle = node;
                 targetHwnd = new nint(TryGetStatic(() => handle.Current.NativeWindowHandle));
                 if (targetHwnd == 0) node = TryGet(() => TreeWalker.ControlViewWalker.GetParent(handle));
             }
-            if (targetHwnd == 0) return true; // can't resolve a window; don't block
-            return GetAncestor(hwndAtPoint, GA_ROOT) == GetAncestor(targetHwnd, GA_ROOT);
+            if (targetHwnd == 0) return null; // can't resolve a window; don't block
+            return GetAncestor(hwndAtPoint, GA_ROOT) == GetAncestor(targetHwnd, GA_ROOT)
+                ? null : "another window";
         }
-        catch { return true; } // never let the guard itself block a legitimate click
+        catch { return null; } // never let the guard itself block a legitimate click
+    }
+
+    /// <summary>True when <paramref name="a"/> is the same element as <paramref name="target"/>,
+    /// or one is an ancestor of the other — a click on a child/parent still "hits" the target
+    /// (e.g. FromPoint returns an inner text element of the button we aimed at).</summary>
+    private static bool SameRuntimeIdOrRelated(AutomationElement a, AutomationElement target)
+    {
+        int[]? Rid(AutomationElement e) => TryGet(() => e.GetRuntimeId());
+        static bool Eq(int[]? p, int[]? q) => p is not null && q is not null && p.AsSpan().SequenceEqual(q);
+
+        var targetRid = Rid(target);
+        // a == target, or a is a descendant of target (walk a's ancestors up to target)
+        var node = a;
+        for (var depth = 0; node is not null && depth < 40; depth++)
+        {
+            if (Eq(Rid(node), targetRid)) return true;
+            node = TryGet(() => TreeWalker.ControlViewWalker.GetParent(node));
+        }
+        // or target is a descendant of a (walk target's ancestors up to a)
+        var aRid = Rid(a);
+        node = target;
+        for (var depth = 0; node is not null && depth < 40; depth++)
+        {
+            if (Eq(Rid(node), aRid)) return true;
+            node = TryGet(() => TreeWalker.ControlViewWalker.GetParent(node));
+        }
+        return false;
     }
 
     private const uint GA_ROOT = 2;
