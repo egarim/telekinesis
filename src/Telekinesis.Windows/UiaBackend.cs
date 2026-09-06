@@ -391,10 +391,18 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         var bounds = ToBounds(TryGet(() => el.Current.BoundingRectangle));
         if (bounds is null)
             return ActionResult.Failed(ActionPath.InputInjection, "Element has no on-screen bounds to click.");
+        var tcx = bounds.X + bounds.Width / 2;
+        var tcy = bounds.Y + bounds.Height / 2;
+        // Same occlusion guard as ClickAsync: focusing a covered field would click the
+        // wrong control and type into it.
+        if (Occluder(el, tcx, tcy) is { } coveredBy)
+            return ActionResult.Failed(ActionPath.InputInjection,
+                $"Element is covered by {coveredBy} at its focus-click point; typing would go to the wrong "
+                + "control. Bring it to the foreground, or use the native value pattern.");
         try
         {
             FlashIntent(bounds, "type here");
-            _injector.MoveTo(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
+            _injector.MoveTo(tcx, tcy);
             _injector.Click(PointerButton.Left);
             Thread.Sleep(100); // let focus settle before typing
             _injector.Chord([WindowsKeyMap.VK_CONTROL, (ushort)'A']);
@@ -437,9 +445,11 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
         var cy = bounds.Y + bounds.Height / 2;
         // The a11y tree lists occluded elements as Visible; injecting a click at a
         // covered center would hit whatever is on top. Refuse rather than mis-click.
-        if (!PointHitsTargetWindow(el, cx, cy))
+        if (Occluder(el, cx, cy) is { } coveredBy)
             return ActionResult.Failed(ActionPath.InputInjection,
-                "Element is covered by another window at its click point; a pointer click would hit the wrong target. Bring it to the foreground, or use the native action (invoke/set_value) which does not depend on being on top.");
+                $"Element is covered by {coveredBy} at its click point; a pointer click would hit the wrong "
+                + "target. Bring it to the foreground, or use the native action (invoke/set_value) which does "
+                + "not depend on being on top.");
         try
         {
             FlashIntent(bounds, "click");
@@ -922,30 +932,104 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
 
     private struct POINT { public int X, Y; }
 
-    /// <summary>True if a pointer click at (x,y) would land on the target element's own
-    /// top-level window, rather than something covering it. UIA reports occluded elements
-    /// as Visible with plausible bounds, so an injected click can hit whatever is on top;
-    /// this guards the injection fallback. Coarse (window-level) but fast and reliable.</summary>
-    private static bool PointHitsTargetWindow(AutomationElement el, int x, int y)
+    /// <summary>
+    /// Returns a short description of what actually sits at (x,y) when it is NOT the
+    /// target element (nor an ancestor/descendant of it) — i.e. the target is occluded —
+    /// or null when a click there would land on the target. UIA reports occluded elements
+    /// as Visible with plausible bounds, so this guards the injection fallback against
+    /// mis-clicks. Element-level via <see cref="AutomationElement.FromPoint"/> so it also
+    /// catches occlusion WITHIN one window (modal overlays in WPF/WinUI/Uno apps, which
+    /// are a single HWND — the coarse window check misses those); falls back to a
+    /// window-level check when FromPoint can't resolve.
+    /// </summary>
+    private static string? Occluder(AutomationElement el, int x, int y)
     {
+        AutomationElement? atPoint;
+        try { atPoint = AutomationElement.FromPoint(new System.Windows.Point(x, y)); }
+        catch { atPoint = null; }
+
+        if (atPoint is not null)
+        {
+            switch (Relationship(atPoint, el))
+            {
+                case Rel.Related:
+                    return null; // the point hits the target (or its child/parent)
+                case Rel.Unrelated: // CONFIDENT the point lands on a different element
+                    var name = TryGet(() => atPoint.Current.Name);
+                    var type = TryGet(() => atPoint.Current.LocalizedControlType) ?? "element";
+                    return string.IsNullOrEmpty(name) ? $"another {type}" : $"the {type} \"{name}\"";
+                case Rel.Unknown:
+                    break; // can't prove it either way — defer to the window-level check below
+            }
+        }
+
+        // Window-level fallback: robust, and the only signal we trust when element
+        // identity is uncertain. Fires when FromPoint failed OR the relationship was Unknown.
         try
         {
             var hwndAtPoint = WindowFromPoint(new POINT { X = x, Y = y });
-            if (hwndAtPoint == 0) return false;
-            // Most UIA elements are windowless; walk up the control view until an
-            // ancestor exposes a real HWND, then compare root windows.
+            if (hwndAtPoint == 0) return null; // uncertain — don't block
             nint targetHwnd = 0;
             var node = el;
             while (node is not null && targetHwnd == 0)
             {
-                var handle = node; // capture for the lambda
+                var handle = node;
                 targetHwnd = new nint(TryGetStatic(() => handle.Current.NativeWindowHandle));
                 if (targetHwnd == 0) node = TryGet(() => TreeWalker.ControlViewWalker.GetParent(handle));
             }
-            if (targetHwnd == 0) return true; // can't resolve a window; don't block
-            return GetAncestor(hwndAtPoint, GA_ROOT) == GetAncestor(targetHwnd, GA_ROOT);
+            if (targetHwnd == 0) return null; // can't resolve a window; don't block
+            return GetAncestor(hwndAtPoint, GA_ROOT) == GetAncestor(targetHwnd, GA_ROOT)
+                ? null : "another window";
         }
-        catch { return true; } // never let the guard itself block a legitimate click
+        catch { return null; } // never let the guard itself block a legitimate click
+    }
+
+    private enum Rel { Related, Unrelated, Unknown }
+
+    /// <summary>
+    /// Relationship between the element found at the click point and the target: Related
+    /// (same, or one an ancestor of the other — a click still hits the target, e.g.
+    /// FromPoint returns the button's inner text), Unrelated (both lineages resolved
+    /// cleanly to the root without a match — a real occluder), or Unknown (a runtime id
+    /// was unavailable, a tree walk threw, or the depth cap was hit). The guard only
+    /// blocks on a confident Unrelated; Unknown must never block a legitimate click.
+    /// </summary>
+    private static Rel Relationship(AutomationElement a, AutomationElement target)
+    {
+        var aRid = TryGet(() => a.GetRuntimeId());
+        var tRid = TryGet(() => target.GetRuntimeId());
+        if (aRid is null || tRid is null) return Rel.Unknown;
+
+        var up1 = WalkFor(a, tRid);      // is target an ancestor of a?
+        if (up1 == Rel.Related) return Rel.Related;
+        var up2 = WalkFor(target, aRid); // is a an ancestor of target?
+        if (up2 == Rel.Related) return Rel.Related;
+        // Only "Unrelated" when BOTH walks reached the root cleanly (no match, no error).
+        return up1 == Rel.Unrelated && up2 == Rel.Unrelated ? Rel.Unrelated : Rel.Unknown;
+    }
+
+    /// <summary>Walk <paramref name="start"/>'s ancestor chain looking for
+    /// <paramref name="rid"/>: Related on a match, Unrelated when the chain reaches the
+    /// root without one, Unknown on any read failure or if the depth cap is hit (deep
+    /// browser/document trees) — the caller treats Unknown as "don't block".</summary>
+    private static Rel WalkFor(AutomationElement start, int[] rid)
+    {
+        // Require a non-empty id: a provider returning an empty runtime-id must not make
+        // two unrelated elements compare "equal" (which would mask a real occlusion).
+        static bool Eq(int[]? p, int[] q) => p is { Length: > 0 } && q.Length > 0 && p.AsSpan().SequenceEqual(q);
+        var node = start;
+        for (var depth = 0; depth < 256; depth++)
+        {
+            var cur = TryGet(() => node!.GetRuntimeId());
+            if (cur is null) return Rel.Unknown;
+            if (Eq(cur, rid)) return Rel.Related;
+            AutomationElement? parent;
+            try { parent = TreeWalker.ControlViewWalker.GetParent(node!); }
+            catch { return Rel.Unknown; }
+            if (parent is null) return Rel.Unrelated; // reached the root cleanly
+            node = parent;
+        }
+        return Rel.Unknown; // cap hit on a very deep tree — defer, don't block
     }
 
     private const uint GA_ROOT = 2;
