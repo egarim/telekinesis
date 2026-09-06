@@ -26,6 +26,19 @@ public sealed class ConsoleSessionService : IDisposable
             ? OperatingSystem.IsWindows() ? "cmd.exe" : Environment.GetEnvironmentVariable("SHELL") ?? "/bin/sh"
             : shell;
 
+        // Windows ConPTY is not enabled by default: on Win11 ARM64 (build 26200) the
+        // child process does not bind to the pseudoconsole and renders to the parent
+        // console instead — which would corrupt the MCP stdio stream (issue #46, its
+        // "Windows ConPTY child-attach" follow-up). The implementation ships and is
+        // canonical; opt in with TELEKINESIS_CONPTY=1 to exercise it once a fixing
+        // Windows build lands. Linux/macOS PTY sessions are fully supported.
+        if (OperatingSystem.IsWindows() &&
+            Environment.GetEnvironmentVariable("TELEKINESIS_CONPTY") != "1")
+            throw new PlatformNotSupportedException(
+                "Interactive console sessions are not yet supported on Windows "
+                + "(ConPTY child-attach limitation, issue #46). Linux/macOS are supported; "
+                + "set TELEKINESIS_CONPTY=1 to force-enable the experimental Windows path.");
+
         var screen = new TerminalScreen(cols, rows);
         IConsoleSession session =
 #if WINDOWS
@@ -70,7 +83,7 @@ public sealed class ConsoleSessionService : IDisposable
 public static class ConsoleTools
 {
     [McpServerTool(Name = "console_open")]
-    [Description("Start a persistent interactive terminal session in a real PTY (ConPTY/openpty). Returns {sessionId, shell}. Use console_write/console_read to interact; sessions live until console_close or server exit.")]
+    [Description("Start a persistent interactive terminal session in a real PTY (openpty on Linux/macOS; Windows ConPTY is not yet supported — issue #46). Returns {sessionId, shell}. Use console_write/console_read to interact; sessions live until console_close or server exit.")]
     public static async Task<string> ConsoleOpen(
         ConsoleSessionService consoles,
         [Description("Program/command line to run; empty = the OS default shell (cmd.exe, $SHELL).")] string? shell,
