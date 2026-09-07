@@ -26,7 +26,7 @@ internal static class Usage
     }
 
     public const string Text = """
-        telekinesis — drive the desktop through the accessibility tree.
+        telekinesis - drive the desktop through the accessibility tree.
 
         USAGE
           telekinesis --help | --version
