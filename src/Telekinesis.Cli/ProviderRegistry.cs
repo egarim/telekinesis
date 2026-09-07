@@ -85,6 +85,7 @@ public sealed class ProviderRegistry
         {
             new(new Providers.BrowserProvider(), External: false, Origin: "built-in"),
             new(new Providers.VisionFallbackProvider(), External: false, Origin: "built-in"),
+            new(new Providers.CdpProvider(), External: false, Origin: "built-in"),
         };
         var warnings = new List<string>();
 

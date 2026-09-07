@@ -81,6 +81,8 @@ has the same power as the server itself.**
 ## Non-goals
 
 Not an extension marketplace — the surface stays claim + wrap + optional tools.
-A Chromium DevTools Protocol provider is the canonical *future* plugin (deep
-DOM/JS access without polluting the OS-agnostic core); the a11y tree remains
-the primary browser path.
+The Chromium DevTools Protocol provider (`cdp`) is the canonical example and now
+ships built-in: it claims **no** application and contributes tools only, so deep
+console/network/JS access never pollutes the OS-agnostic core and the a11y tree
+remains the primary browser path. It is off unless `TELEKINESIS_CDP=1` — see
+[docs/BROWSERS.md](BROWSERS.md#the-cdp-tier--console-network-and-js).
