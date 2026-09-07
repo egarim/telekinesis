@@ -146,7 +146,7 @@ public static class ConsoleTools
     /// <summary>How long a write waits for the child to drain its input before
     /// giving up (issue #61). Generous for a program that is merely busy, short
     /// enough that one that never reads cannot hang the MCP request.</summary>
-    private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(5);
+    internal static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(5);
 
     [McpServerTool(Name = "console_write")]
     [Description("Write text to a console session's stdin. sendEnter appends the Enter key. Send \"\\u0003\" for Ctrl-C.")]

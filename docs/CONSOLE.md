@@ -49,7 +49,7 @@ every mutating call is audit-logged.
 |---|---|---|
 | `console_open` | `shell` (empty = `cmd.exe` on Windows, `$SHELL` else `/bin/sh`), `cols` (default 120), `rows` (default 30) | `{sessionId, shell, cols, rows, screen}` |
 
-At most **16 sessions** may be open at once; `console_open` refuses beyond that rather than spawning another child process, and names `console_list` / `console_close` in the error ([#62](https://github.com/egarim/telekinesis/issues/62)).
+At most **16 sessions** may be open at once; `console_open` refuses beyond that rather than spawning another child process, and names `console_list` / `console_close` in the error ([#62](https://github.com/egarim/telekinesis/issues/62)). A session whose child has **exited still holds its slot** until you `console_close` it — `console_list` shows `alive: false` for those.
 | `console_write` | `sessionId`, `text`, `sendEnter` (default **true**) | `{ok, alive, note?}` |
 | `console_read` | `sessionId`, `lines` (0 = whole screen) | `{screen, alive}` |
 | `console_resize` | `sessionId`, `cols`, `rows` (clamped to 2–1000) | `{ok, cols, rows}` |
@@ -120,6 +120,13 @@ Writes are therefore bounded at **5 seconds**. On a timeout you get:
 
 `ok: false` means the text may have landed **partially** — check `console_read`
 before deciding what to do, and do not simply retry the same write.
+
+On Linux and macOS the bound is enforced in the write itself (the pty master is
+non-blocking, so a write returns a short count rather than blocking). On the
+experimental Windows path it bounds **the caller** only: the underlying pipe write
+cannot be interrupted, so it continues on a background thread and is abandoned.
+That is acceptable there only because the ConPTY path is off by default and
+already unusable ([#46](https://github.com/egarim/telekinesis/issues/46)).
 
 ### Lifetime
 

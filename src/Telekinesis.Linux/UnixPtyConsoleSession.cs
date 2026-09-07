@@ -58,16 +58,34 @@ public sealed partial class UnixPtyConsoleSession : IConsoleSession
             Marshal.FreeHGlobal(attr);
             Marshal.FreeHGlobal(fa);
             Close(slave); // parent keeps only the master end
+            SetNonBlocking(_master);
         }
 
+        // The master is O_NONBLOCK (see SetNonBlocking) so Write can honour a deadline.
+        // That makes Read return EAGAIN instead of blocking, so the reader waits in
+        // poll(POLLIN) rather than spinning — the concern that wrongly ruled out
+        // O_NONBLOCK the first time round.
         _ = Task.Run(() =>
         {
             var buffer = new byte[4096];
             while (true)
             {
+                var pfd = new PollFd { Fd = _master, Events = Pollin };
+                var ready = Poll(ref pfd, 1, 100);
+                if (ready < 0)
+                {
+                    if (Marshal.GetLastWin32Error() == Eintr) continue;
+                    break;
+                }
+                if (ready == 0) continue; // nothing yet; loop so a closed fd is noticed
+                if ((pfd.Revents & (PollErr | PollNval)) != 0) break;
+
                 var n = Read(_master, buffer, buffer.Length);
-                if (n <= 0) break; // EOF/EIO: child gone
-                onOutput(buffer, (int)n);
+                if (n > 0) { onOutput(buffer, (int)n); continue; }
+                if (n == 0) break; // EOF: child gone
+                var err = Marshal.GetLastWin32Error();
+                if (err == Eintr || err == Eagain) continue;
+                break; // EIO on hangup, or the fd was closed under us
             }
             _exited = true;
             WaitPid(_pid, out _, WNOHANG); // reap a self-exited child (e.g. `exit`) — no zombie
@@ -87,33 +105,35 @@ public sealed partial class UnixPtyConsoleSession : IConsoleSession
     public bool Write(string text, TimeSpan timeout)
     {
         var bytes = Encoding.UTF8.GetBytes(text);
-        // A PTY master BLOCKS once the child's input queue is full, so a child that
-        // stopped reading stdin would hang this call forever (issue #61). Gate each
-        // write on poll(POLLOUT) with a deadline instead.
+        // The master is O_NONBLOCK, so write(2) NEVER blocks: it returns a short count
+        // or EAGAIN. That is what makes the deadline real (issue #61).
         //
-        // poll rather than O_NONBLOCK: the same fd is read by the background reader
-        // loop, and making it non-blocking would turn that blocking read into a spin.
-        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+        // Gating on poll(POLLOUT) and then writing the whole remainder was NOT enough:
+        // POLLOUT only promises room for ONE byte, so a large write against a nearly
+        // full queue blocked inside a single write() call, past the deadline — exactly
+        // the megabyte-paste case this exists to bound.
+        var deadline = Environment.TickCount64 + (long)Math.Max(0, timeout.TotalMilliseconds);
         var off = 0;
         while (off < bytes.Length)
         {
+            var n = (int)WriteFd(_master, in bytes[off], bytes.Length - off);
+            if (n > 0) { off += n; continue; }
+
+            var err = Marshal.GetLastWin32Error();
+            if (err == Eintr) continue;              // a signal, not a failure
+            if (err != Eagain) return false;         // fd closed / real error
+
+            // Queue full. Wait for room, but never past the deadline.
             var remaining = deadline - Environment.TickCount64;
             if (remaining <= 0) return false;
-
             var pfd = new PollFd { Fd = _master, Events = Pollout };
-            // Cap each wait so a closed fd or a long timeout still re-checks the deadline.
             var ready = Poll(ref pfd, 1, (int)Math.Min(remaining, 100));
-            if (ready < 0) return false;              // poll error: fd gone
-            if (ready == 0) continue;                 // not writable yet, deadline re-checked
-            if ((pfd.Revents & (PollErr | PollHup | PollNval)) != 0) return false;
-
-            // POLLOUT means at least one byte fits, so this write cannot block.
-            var n = (int)WriteFd(_master, in bytes[off], bytes.Length - off);
-            if (n <= 0) return false;                 // fd closed / error
-            off += n;
+            if (ready < 0 && Marshal.GetLastWin32Error() != Eintr) return false;
+            if (ready > 0 && (pfd.Revents & (PollErr | PollHup | PollNval)) != 0) return false;
         }
         return true;
     }
+
 
 
     public void Resize(int cols, int rows)
@@ -151,6 +171,7 @@ public sealed partial class UnixPtyConsoleSession : IConsoleSession
                 ? h : nint.Zero);
     }
 
+    private const short Pollin = 0x0001;
     private const short Pollout = 0x0004;
     private const short PollErr = 0x0008;
     private const short PollHup = 0x0010;
@@ -162,6 +183,23 @@ public sealed partial class UnixPtyConsoleSession : IConsoleSession
         public int Fd;
         public short Events;
         public short Revents;
+    }
+
+    private const int Eintr = 4;
+    // errno and O_NONBLOCK differ between macOS and Linux.
+    private static int Eagain => OperatingSystem.IsMacOS() ? 35 : 11;
+    private const int FGetfl = 3, FSetfl = 4;
+    private static int ONonblock => OperatingSystem.IsMacOS() ? 0x0004 : 0x800;
+
+    [DllImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    private static extern int Fcntl(int fd, int cmd, int arg);
+
+    /// <summary>Put the pty master in non-blocking mode so a write cannot outlast its
+    /// deadline. The reader compensates with poll(POLLIN) instead of spinning.</summary>
+    private static void SetNonBlocking(int fd)
+    {
+        var flags = Fcntl(fd, FGetfl, 0);
+        if (flags >= 0) _ = Fcntl(fd, FSetfl, flags | ONonblock);
     }
 
     [DllImport("libc", EntryPoint = "poll", SetLastError = true)]

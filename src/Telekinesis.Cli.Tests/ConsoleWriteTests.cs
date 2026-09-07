@@ -108,4 +108,41 @@ public class ConsoleWriteTests
         Assert.Contains("console_close", ex.Message);
         Assert.Contains("console_list", ex.Message);
     }
+
+    [Fact]
+    public void A_megabyte_paste_to_a_child_that_never_reads_stdin_is_BOUNDED()
+    {
+        // Issue #61's actual contract: a write must never hang the caller. It may
+        // succeed or report false — what it may not do is block indefinitely.
+        //
+        // Asserting a specific outcome would be wrong: whether a stuck child's queue
+        // fills or the tty line discipline discards the overflow is platform
+        // behaviour (macOS drops past MAX_INPUT; Linux fills and blocks). The bound
+        // is the invariant on both. `sleep` never reads stdin.
+        if (OperatingSystem.IsWindows()) return; // ConPTY is gated off (#46/#49)
+
+        using var consoles = new ConsoleSessionService();
+        var entry = consoles.Open("/bin/sh -c 'exec sleep 30'", 80, 24);
+
+        var big = new string('x', 4 * 1024 * 1024); // far past any pty input queue
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        entry.Session.Write(big, TimeSpan.FromSeconds(2));
+        sw.Stop();
+
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(8),
+            $"write took {sw.Elapsed.TotalSeconds:F1}s - the deadline is not being honoured");
+        consoles.Close(entry.Id);
+    }
+
+    [Fact]
+    public void A_write_to_a_child_that_IS_reading_still_succeeds()
+    {
+        // The counterpart: bounding must not break the ordinary path.
+        if (OperatingSystem.IsWindows()) return;
+
+        using var consoles = new ConsoleSessionService();
+        var entry = consoles.Open("/bin/sh", 80, 24);
+        Assert.True(entry.Session.Write("echo ok\r", TimeSpan.FromSeconds(5)));
+        consoles.Close(entry.Id);
+    }
 }

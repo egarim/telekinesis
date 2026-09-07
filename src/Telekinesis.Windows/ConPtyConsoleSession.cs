@@ -95,21 +95,27 @@ public sealed class ConPtyConsoleSession : IConsoleSession
     public bool Write(string text, TimeSpan timeout)
     {
         var bytes = Encoding.UTF8.GetBytes(text);
-        // Same hazard as the Unix path (issue #61): the ConPTY input pipe blocks once
-        // the child stops draining it. WriteAsync + a timeout CTS bounds the wait.
-        // A timed-out write may have landed partially — the caller is told it did not
-        // complete, which is the actionable fact; the session is left for inspection.
-        try
+
+        // WriteAsync + a CancellationToken does NOT bound this. _input is a
+        // non-overlapped FileStream over a CreatePipe handle, so WriteAsync is the
+        // synchronous Write queued to the thread pool: the token only decides whether
+        // it STARTS, never interrupts it mid-flight. Verified — the thread sits in
+        // write() long after the token expires. Flush() is a second unbounded block,
+        // since FlushFileBuffers on a pipe waits for the reader to drain.
+        //
+        // So bound the CALLER instead, which is what issue #61 is actually about: the
+        // MCP request must not hang. The write continues on a pool thread and is
+        // abandoned. That leaks one thread per stuck write, which is acceptable only
+        // because this path is opt-in and already unusable (#46/#49) — a real fix
+        // needs an overlapped pipe (CreateNamedPipe) or a dedicated writer thread.
+        var write = Task.Run(() =>
         {
-            using var cts = new CancellationTokenSource(timeout);
-            _input.WriteAsync(bytes, 0, bytes.Length, cts.Token).GetAwaiter().GetResult();
+            _input.Write(bytes, 0, bytes.Length);
             _input.Flush();
-            return true;
-        }
-        catch (OperationCanceledException) { return false; }
-        catch (IOException) { return false; }        // pipe closed under us
-        catch (ObjectDisposedException) { return false; }
+        });
+        return write.Wait(timeout);
     }
+
 
 
     public void Resize(int cols, int rows) =>

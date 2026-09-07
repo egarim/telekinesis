@@ -130,7 +130,7 @@ public static class Repl
                         var entry = consoles.Get(parts[1]);
                         // Bounded like the tool path (issue #61): a child that stopped
                         // reading stdin must not hang the repl either.
-                        if (!entry.Session.Write(string.Join(' ', parts[2..]) + "\r", TimeSpan.FromSeconds(5)))
+                        if (!entry.Session.Write(string.Join(' ', parts[2..]) + "\r", ConsoleTools.WriteTimeout))
                             Console.WriteLine("  (write timed out - the child is not reading stdin)");
                         await Task.Delay(400);
                         Console.WriteLine(Indent(entry.Screen.Render(12)));
