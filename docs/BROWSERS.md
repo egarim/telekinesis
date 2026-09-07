@@ -154,6 +154,11 @@ leak:
   | camelCase assignments | `…Token …Secret …Password …Passwd …Key …Session …Sid …Auth` — case-**sensitive** so the capital is the word boundary, which is why `monkey=1` and `turnkey=2` do not match |
   | URLs embedded in free text | re-projected through the URL rules above |
 
+  **Each shape has a minimum length**, so a short value slips through: `Bearer`
+  and `sk-` need 16+ characters, JWT segments 10+, `ghp_` 20+, `AIza` exactly 35
+  after the prefix, `AKIA` exactly 16. A 12-character `sk-` string is not caught.
+  Do not read the table as "any value that starts like this is redacted".
+
   Best-effort by construction: a secret that looks like ordinary prose is not
   catchable, which is why bodies and headers are excluded outright rather than
   filtered. Values already replaced are skipped, so a projected query keeps its
@@ -209,7 +214,7 @@ asked too late":
 |---|---|---|
 | Console ring | **200** entries | the 201st message evicts the oldest — a chatty page overwrites its own history in seconds |
 | Network ring | **500** entries | same |
-| Any emitted string | **2048** chars, then `…` | long console lines and long URLs are cut, not paged |
+| Any scrubbed string | **2048** chars, then `…` | console text and URLs are cut, not paged. Protocol-ish fields (`method`, `resourceType`, `mimeType`) bypass scrubbing and truncation |
 | `browser_console` `max` | default 100, **clamped to 200** | asking for more silently gives you 200 |
 | `browser_network` `max` | default 100, **clamped to 500** | filtering by `urlContains` happens over the newest 500, then `max` applies |
 | CDP HTTP calls (`/json/list`) | 5 s timeout | |

@@ -11,6 +11,11 @@ conservative.
   **127.0.0.1 only**. Older examples write `serve --sse`; `--sse` was never a
   real flag — the code does not look for it — so it is accepted and ignored, and
   plain `serve` is the HTTP/SSE server.
+
+  Stated plainly, because the rest of this page depends on it: **the endpoint has
+  no authentication and no TLS.** Anything that can reach the port can call the
+  tools that are registered on it. Loopback binding is the whole access control,
+  which is why the tunnel below is not optional.
   For anything beyond the local machine, put it behind an *authenticated tunnel*
   (the Lun.Os tunnel, an SSH -L forward, or a reverse proxy that terminates auth).
   Never expose the port itself; there is intentionally no listen-on-0.0.0.0 flag.
@@ -59,8 +64,13 @@ JSON line to:
 - otherwise `~/.local/state/telekinesis/audit.log` (Linux/macOS)
   or `%LOCALAPPDATA%\Telekinesis\state\telekinesis\audit.log` (Windows).
 
-Fields: timestamp, tool, target, success, action path. Secrets never appear —
-see below.
+Fields: timestamp, tool, target, success, action path. `fill_credential` logs
+only field metadata, never the secret.
+
+**One tool does write what you gave it:** `console_write` records the typed text
+verbatim, because a shell command *is* the audit trail. So the log is only as
+clean as what you type into a PTY — never type a credential into a console
+session ([CONSOLE.md](CONSOLE.md#security)).
 
 One tool also echoes a line to **stderr**, separate from the audit file:
 
@@ -90,12 +100,14 @@ values matter:
 | Variable | Value |
 |---|---|
 | `TK_CRED_FIELD` | the requested field string — `password`, `username`, `totp`, … (whatever the caller asked for) |
-| `TK_CRED_APP` | the Telekinesis **application id**, in the form `pid:N`. **Not** a window title, process name, bundle id or URL |
+| `TK_CRED_APP` | the backend's **application id** — and its format is platform-specific: `pid:N` on Windows, the bare pid (`4812`) on macOS, an AT-SPI D-Bus bus name (`:1.234`, no pid in it at all) on Linux |
 | `TK_CRED_ELEMENT` | the target field's accessible Name, or an empty string when it has none |
 
-The middle row is the one that surprises people: a wrapper that tries to match
-vault entries on an application *name* will be handed `pid:4812` and match
-nothing. Map the pid to whatever your vault keys on before you look the entry up.
+The middle row is the one that surprises people. A wrapper that tries to match
+vault entries on an application *name* gets an id instead and matches nothing —
+and the id is not even the same shape across platforms, so parse it per platform
+rather than assuming `pid:`. On Linux there is no pid in it to recover; resolve
+the bus name if you need the process.
 
 - No provider configured → the tool returns `available: false` with setup
   guidance. It **never** falls back to typing a secret from model context.

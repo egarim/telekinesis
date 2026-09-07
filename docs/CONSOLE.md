@@ -50,7 +50,7 @@ every mutating call is audit-logged.
 | `console_open` | `shell` (empty = `cmd.exe` on Windows, `$SHELL` else `/bin/sh`), `cols` (default 120), `rows` (default 30) | `{sessionId, shell, screen}` |
 | `console_write` | `sessionId`, `text`, `sendEnter` (**no default — see below**) | `{ok, alive}` |
 | `console_read` | `sessionId`, `lines` (0 = whole screen) | `{screen, alive}` |
-| `console_resize` | `sessionId`, `cols`, `rows` | `{ok}` |
+| `console_resize` | `sessionId`, `cols`, `rows` (min 2, **no maximum**) | `{ok}` |
 | `console_close` | `sessionId` | `{ok}` |
 | `console_list` | — | `[{sessionId, shell, alive, opened}]` |
 
@@ -68,6 +68,12 @@ the session's `cols`×`rows` screen buffer (120×30 by default), so:
 - A program that redraws in place (a progress bar, `top`, an installer TUI)
   reads correctly, which is the whole point of rendering rather than
   concatenating.
+
+Sizes are clamped to a minimum of 2×2 but have **no upper bound**, and a resize
+allocates the whole grid up front — `console_resize(100000, 100000)` asks for a
+ten-billion-cell array and will exhaust memory
+([#58](https://github.com/egarim/telekinesis/issues/58)). Keep it to real terminal
+sizes.
 
 `console_open` waits 300 ms before returning so the shell has painted its
 banner and prompt; `console_write` waits 250 ms so the program has a beat to
@@ -130,8 +136,19 @@ confirmation prompt. The protections are the ones that apply to every action:
 - absent over `serve` unless you passed `--enable-actions`;
 - every `console_open`, `console_write`, `console_resize` and `console_close`
   appended to the audit log (see [REMOTE.md](REMOTE.md#audit-log)), with the
-  written text recorded — so **do not type secrets into a console session**, use
-  `fill_credential` for credentials or pass them through the child's environment.
+  written text recorded verbatim — so **do not type secrets into a console
+  session**; use `fill_credential` for credentials.
+
+Two asymmetries worth knowing:
+
+- **`console_read` is not audited.** Writes leave a trail, reads do not — and the
+  screen can hold anything the child painted: file contents, `env` output, a
+  token echoed by a failing command. Nothing records that an agent read it.
+- **The child inherits your whole environment.** On Unix every parent environment
+  variable is copied into the PTY child, so any secret already in Telekinesis's
+  environment is available to whatever runs in that session — and readable back
+  off the screen if a command prints it. "Pass secrets via the environment" is
+  not a mitigation here; the environment is already shared.
 
 Console output is untrusted, exactly like page content: a command's output can
 contain text aimed at the agent reading it. Treat a rendered screen as data,

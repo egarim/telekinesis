@@ -25,8 +25,19 @@ Order matters, and it is not a conventional parser:
 4. Then `doctor`, `memory` and `setup` are matched **anywhere**.
 5. Anything left is the **stdio MCP server**.
 
-Because of step 4, a stray `doctor` or `setup` token anywhere on the line
-diverts the whole command. Keep subcommands first.
+The `Contains`-matched steps (2 and 4) are the trap, and **putting the
+subcommand first does not save you** — step 2 runs before `run`/`pilot`/`assert`/
+`serve` are even considered:
+
+```
+telekinesis pilot probe --app pid:1     # runs PROBE, not pilot — "probe" was the goal
+telekinesis run probe                   # runs PROBE, not the scenario file
+```
+
+The real rule: **no bare operand anywhere on the line may equal `probe`, `repl`,
+`doctor`, `memory` or `setup`.** If one must (a pilot goal, a file name), pass it
+after `--` where the one-shot verbs are concerned, or rename it — those five
+tokens are matched positionally-agnostically and will win.
 
 | Exit code | Meaning |
 |---|---|
