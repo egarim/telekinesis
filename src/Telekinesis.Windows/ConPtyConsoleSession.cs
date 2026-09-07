@@ -1,3 +1,4 @@
+using System.IO;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -91,12 +92,25 @@ public sealed class ConPtyConsoleSession : IConsoleSession
         });
     }
 
-    public void Write(string text)
+    public bool Write(string text, TimeSpan timeout)
     {
         var bytes = Encoding.UTF8.GetBytes(text);
-        _input.Write(bytes, 0, bytes.Length);
-        _input.Flush();
+        // Same hazard as the Unix path (issue #61): the ConPTY input pipe blocks once
+        // the child stops draining it. WriteAsync + a timeout CTS bounds the wait.
+        // A timed-out write may have landed partially — the caller is told it did not
+        // complete, which is the actionable fact; the session is left for inspection.
+        try
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            _input.WriteAsync(bytes, 0, bytes.Length, cts.Token).GetAwaiter().GetResult();
+            _input.Flush();
+            return true;
+        }
+        catch (OperationCanceledException) { return false; }
+        catch (IOException) { return false; }        // pipe closed under us
+        catch (ObjectDisposedException) { return false; }
     }
+
 
     public void Resize(int cols, int rows) =>
         ResizePseudoConsole(_pty, new COORD { X = (short)cols, Y = (short)rows });

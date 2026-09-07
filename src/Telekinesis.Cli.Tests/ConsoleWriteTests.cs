@@ -16,9 +16,16 @@ public class ConsoleWriteTests
     private sealed class FakeSession : IConsoleSession
     {
         public readonly List<string> Writes = [];
+        /// <summary>Simulates a child that has stopped reading stdin (issue #61).</summary>
+        public bool Stuck;
         public string Shell => "fake";
         public bool IsAlive => true;
-        public void Write(string text) => Writes.Add(text);
+        public bool Write(string text, TimeSpan timeout)
+        {
+            if (Stuck) return false;
+            Writes.Add(text);
+            return true;
+        }
         public void Resize(int cols, int rows) { }
         public void Dispose() { }
     }
@@ -73,5 +80,32 @@ public class ConsoleWriteTests
         using var doc = JsonDocument.Parse(json);
         Assert.Equal(TerminalScreen.MaxDimension, doc.RootElement.GetProperty("cols").GetInt32());
         Assert.Equal(TerminalScreen.MaxDimension, doc.RootElement.GetProperty("rows").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_child_that_stopped_reading_is_reported_not_silently_hung()
+    {
+        // Issue #61: an unbounded write used to block the whole MCP request. The
+        // bound turns that into an answer the agent can act on.
+        var (svc, pty, id) = Session();
+        pty.Stuck = true;
+        var json = await ConsoleTools.ConsoleWrite(svc, id, "ls");
+        using var doc = JsonDocument.Parse(json);
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("not reading stdin", doc.RootElement.GetProperty("note").GetString());
+    }
+
+    [Fact]
+    public void Opening_past_the_cap_is_refused_and_says_how_to_recover()
+    {
+        // Issue #62: each session is a live child process; a runaway agent used to
+        // leak them for the life of the server.
+        var svc = new ConsoleSessionService();
+        for (var i = 0; i < ConsoleSessionService.MaxSessions; i++)
+            svc.RegisterForTest(new FakeSession(), new TerminalScreen(80, 24));
+
+        var ex = Assert.Throws<InvalidOperationException>(() => svc.Open("sh", 80, 24));
+        Assert.Contains("console_close", ex.Message);
+        Assert.Contains("console_list", ex.Message);
     }
 }

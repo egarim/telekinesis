@@ -84,18 +84,37 @@ public sealed partial class UnixPtyConsoleSession : IConsoleSession
         return [.. list];
     }
 
-    public void Write(string text)
+    public bool Write(string text, TimeSpan timeout)
     {
         var bytes = Encoding.UTF8.GetBytes(text);
-        // write(2) on a PTY master can be partial — loop or a large paste loses its tail.
+        // A PTY master BLOCKS once the child's input queue is full, so a child that
+        // stopped reading stdin would hang this call forever (issue #61). Gate each
+        // write on poll(POLLOUT) with a deadline instead.
+        //
+        // poll rather than O_NONBLOCK: the same fd is read by the background reader
+        // loop, and making it non-blocking would turn that blocking read into a spin.
+        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
         var off = 0;
         while (off < bytes.Length)
         {
+            var remaining = deadline - Environment.TickCount64;
+            if (remaining <= 0) return false;
+
+            var pfd = new PollFd { Fd = _master, Events = Pollout };
+            // Cap each wait so a closed fd or a long timeout still re-checks the deadline.
+            var ready = Poll(ref pfd, 1, (int)Math.Min(remaining, 100));
+            if (ready < 0) return false;              // poll error: fd gone
+            if (ready == 0) continue;                 // not writable yet, deadline re-checked
+            if ((pfd.Revents & (PollErr | PollHup | PollNval)) != 0) return false;
+
+            // POLLOUT means at least one byte fits, so this write cannot block.
             var n = (int)WriteFd(_master, in bytes[off], bytes.Length - off);
-            if (n <= 0) break; // fd closed / error
+            if (n <= 0) return false;                 // fd closed / error
             off += n;
         }
+        return true;
     }
+
 
     public void Resize(int cols, int rows)
     {
@@ -131,6 +150,22 @@ public sealed partial class UnixPtyConsoleSession : IConsoleSession
             name == "util" && OperatingSystem.IsLinux() && NativeLibrary.TryLoad("libutil.so.1", out var h)
                 ? h : nint.Zero);
     }
+
+    private const short Pollout = 0x0004;
+    private const short PollErr = 0x0008;
+    private const short PollHup = 0x0010;
+    private const short PollNval = 0x0020;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PollFd
+    {
+        public int Fd;
+        public short Events;
+        public short Revents;
+    }
+
+    [DllImport("libc", EntryPoint = "poll", SetLastError = true)]
+    private static extern int Poll(ref PollFd fds, nuint nfds, int timeoutMs);
 
     [DllImport("util", EntryPoint = "openpty", SetLastError = true)]
     private static extern int OpenPty(out int master, out int slave, nint name, nint termp, ref WinSize win);
