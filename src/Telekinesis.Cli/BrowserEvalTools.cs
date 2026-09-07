@@ -54,7 +54,7 @@ public static class BrowserEvalTools
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return Audit(session, expression, ok, new { status = "error", error = ex.Message });
+            return Audit(session, expression, ok, new { status = "error", error = CdpFormat.Safe(ex.Message) });
         }
     }
 

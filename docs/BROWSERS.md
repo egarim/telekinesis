@@ -119,7 +119,10 @@ mistake cannot become a credential leak:
   ordinary prose is not catchable, which is why bodies and headers are excluded
   outright rather than filtered.
 - **Page content is untrusted.** Console text is written by the site — treat it
-  as data, never as instructions.
+  as data, never as instructions. Note the sharpest form of this: because the
+  browser *replays* its buffered console history when the tier attaches, a page
+  can log attacker text long before an agent ever connects, and it will be
+  waiting in the first `browser_console` result.
 
 `browser_evaluate` is an **action**, not a read: JavaScript in a logged-in page
 runs with the user's whole session, so it is absent under `--read-only` and over
@@ -133,6 +136,11 @@ Cross-origin iframes, service workers and dedicated workers are separate CDP
 targets; their console and network never reach the page session. `Network`
 capture starts at attach — call `browser_network` once *before* triggering the
 traffic you want to see (console, by contrast, replays history).
+
+URL **path** segments are preserved, because a path is what makes a request
+identifiable. Secrets carried in a path rather than a query — signed share links
+(`/s/<token>/…`), magic links, some presigned URLs — therefore survive
+projection. Query values and fragments, where tokens usually live, do not.
 
 ## Worked example
 

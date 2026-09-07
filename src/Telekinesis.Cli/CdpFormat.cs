@@ -123,7 +123,16 @@ internal static partial class CdpFormat
     [GeneratedRegex(@"-----BEGIN[^-]{0,40}(?:PRIVATE KEY|CERTIFICATE)-----[\s\S]*?-----END[^-]*-----")]
     private static partial Regex Pem();
 
-    [GeneratedRegex(@"(?i)\b(?:password|passwd|secret|token|api[_-]?key|client[_-]?secret|refresh[_-]?token|session[_-]?id)\b\s*[:=]\s*\S+")]
+    /// <summary>
+    /// key=value / key: value where the key names a secret. The optional
+    /// prefix group catches compound keys (access_token, x-api-key) that a
+    /// plain \b would miss — '_' is a word character, so \btoken\b does NOT
+    /// match inside "access_token". Session cookies are the likeliest secret
+    /// shape in a logged-in browser, so session/sid/PHPSESSID are covered.
+    /// The value lookahead skips pairs URL projection already redacted, so a
+    /// projected query keeps its diagnostically useful parameter NAMES.
+    /// </summary>
+    [GeneratedRegex(@"(?i)(?<![A-Za-z0-9])(?:[a-z0-9]+[_-])?(?:password|passwd|secret|token|apikey|api[_-]key|session|sessionid|jsessionid|phpsessid|sid|auth|authorization)(?![a-z0-9])\s*[:=]\s*(?!\[redacted\])\S+")]
     private static partial Regex Assignment();
 
     /// <summary>

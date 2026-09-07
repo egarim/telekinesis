@@ -40,6 +40,13 @@ public class CdpTests
     [InlineData("sk_live_abcdefghijklmnopqrst", "sk_live_abcdefghij")]
     [InlineData("password=hunter2", "hunter2")]
     [InlineData("api_key: abc123xyz", "abc123xyz")]
+    // Compound keys: '_' is a word char, so a plain \btoken\b never matched these.
+    [InlineData("access_token=opaquevalue1", "opaquevalue1")]
+    [InlineData("X-API-Key: k9secretval", "k9secretval")]
+    // Session cookies — the likeliest secret shape in a logged-in browser.
+    [InlineData("Cookie: session=hunter2", "hunter2")]
+    [InlineData("sid=abc123def", "abc123def")]
+    [InlineData("PHPSESSID=zzz111yyy", "zzz111yyy")]
     public void Scrub_removes_known_secret_shapes(string text, string secretFragment)
     {
         var scrubbed = CdpFormat.Scrub(text);
@@ -47,9 +54,13 @@ public class CdpTests
         Assert.Contains("[redacted]", scrubbed, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Scrub_leaves_ordinary_text_alone()
-        => Assert.Equal("rendered 42 rows in 13ms", CdpFormat.Scrub("rendered 42 rows in 13ms"));
+    [Theory]
+    [InlineData("rendered 42 rows in 13ms")]
+    [InlineData("consider=5")]        // contains "sid" — must not trip the assignment rule
+    [InlineData("president: bob")]
+    [InlineData("width=100")]
+    public void Scrub_leaves_ordinary_text_alone(string text)
+        => Assert.Equal(text, CdpFormat.Scrub(text));
 
     [Fact]
     public void Scrub_projects_urls_embedded_in_message_text()
@@ -213,10 +224,17 @@ public class CdpTests
               "wallTime":1757000001,"timestamp":2.0,"redirectResponse":{"status":302},
               "request":{"url":"https://a.test/two","method":"GET"}}}
             """));
-        var urls = session.Network.Snapshot(10).Select(e => e.Url).ToList();
+        var entries = session.Network.Snapshot(10);
+        var urls = entries.Select(e => e.Url).ToList();
         Assert.Equal(2, urls.Count);
         Assert.Contains("https://a.test/one", urls);
         Assert.Contains("https://a.test/two", urls);
+
+        // The first hop's 302 arrives only as redirectResponse on the SECOND
+        // requestWillBeSent — without closing the old hop out it keeps a null status.
+        var first = entries.Single(e => e.Url == "https://a.test/one");
+        Assert.Equal(302, first.Status);
+        Assert.NotNull(first.DurationMs);
     }
 
     [Fact]

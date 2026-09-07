@@ -144,7 +144,8 @@ keep it on stdio or behind authenticated tunnels.
 
 The optional CDP browser tier has no authentication of its own — reachability of the
 debugging port *is* authorization — so it is off unless `TELEKINESIS_CDP=1`, binds
-loopback only, and returns metadata and scrubbed text: never a header, a request or
-response body, a cookie, or storage. `browser_evaluate` is an action, not a read,
+loopback only, and returns metadata and scrubbed text: headers, request and response
+bodies, cookies and storage are never read out of the protocol at all, and free text is
+scrubbed of known secret shapes on a best-effort basis. `browser_evaluate` is an action, not a read,
 because JavaScript in a logged-in page is the user's whole account.
 

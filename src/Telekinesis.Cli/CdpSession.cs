@@ -193,12 +193,22 @@ internal sealed class CdpSession : IAsyncDisposable
 
         var session = new CdpSession(target, socket);
         _ = Task.Run(session.PumpAsync);
-        // Runtime/Log replay the browser's buffered history on enable; Network does
-        // NOT, so traffic is only captured from this moment on.
-        await session.CallAsync("Runtime.enable", null, ct);
-        await session.CallAsync("Log.enable", null, ct);
-        await session.CallAsync("Network.enable",
-            new { maxTotalBufferSize = 10_000_000, maxResourceBufferSize = 1_000_000 }, ct);
+        try
+        {
+            // Runtime/Log replay the browser's buffered history on enable; Network
+            // does NOT, so traffic is only captured from this moment on.
+            await session.CallAsync("Runtime.enable", null, ct);
+            await session.CallAsync("Log.enable", null, ct);
+            await session.CallAsync("Network.enable",
+                new { maxTotalBufferSize = 10_000_000, maxResourceBufferSize = 1_000_000 }, ct);
+        }
+        catch
+        {
+            // A half-enabled session is never handed out — tear the socket and pump
+            // down rather than leaking them outside the service's session table.
+            await session.DisposeAsync();
+            throw;
+        }
         return session;
     }
 
@@ -220,14 +230,28 @@ internal sealed class CdpSession : IAsyncDisposable
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(
             @params is null ? new { id, method } : (object)new { id, method, @params });
-        await _send.WaitAsync(ct);
         try
         {
-            // Only the session's own token touches the socket: a per-request token
-            // would Abort() the connection and kill every other in-flight call.
-            await _socket.SendAsync(payload, WebSocketMessageType.Text, true, _cts.Token);
+            await _send.WaitAsync(ct);
+            try
+            {
+                // A per-request token must never reach the socket — cancelling a
+                // send Abort()s the connection and kills every other in-flight
+                // call. A stalled send is a dead session, so bound it at the
+                // SESSION level and fault everyone rather than holding the gate.
+                using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                sendCts.CancelAfter(TimeSpan.FromSeconds(10));
+                await _socket.SendAsync(payload, WebSocketMessageType.Text, true, sendCts.Token);
+            }
+            finally { _send.Release(); }
         }
-        finally { _send.Release(); }
+        catch (Exception ex)
+        {
+            // Never leave a registration behind for a request that never went out.
+            _pending.TryRemove(id, out _);
+            if (ex is not OperationCanceledException || _cts.IsCancellationRequested) Fault(ex);
+            throw;
+        }
 
         try
         {
@@ -281,7 +305,9 @@ internal sealed class CdpSession : IAsyncDisposable
         {
             if (!_pending.TryRemove(id, out var tcs)) return;
             if (root.TryGetProperty("error", out var err))
-                tcs.TrySetException(new InvalidOperationException($"CDP error: {err}"));
+                // Scrubbed like any other page-influenced text — CdpFormat is the
+                // single boundary, so the error channel must not bypass it.
+                tcs.TrySetException(new InvalidOperationException($"CDP error: {CdpFormat.Safe(err.ToString())}"));
             else
                 // Clone: JsonDocument.Parse over the pump's reused buffer does not copy.
                 tcs.TrySetResult(root.TryGetProperty("result", out var res) ? res.Clone() : default);
@@ -371,8 +397,17 @@ internal sealed class CdpSession : IAsyncDisposable
         };
         lock (_netGate)
         {
-            // A redirect re-fires requestWillBeSent with the SAME requestId; keep
-            // both hops as separate entries and point the correlation at the newest.
+            // A redirect re-fires requestWillBeSent with the SAME requestId, and it
+            // carries the PREVIOUS hop's response as redirectResponse — the only
+            // place that 3xx ever appears. Close out the old hop before replacing it,
+            // or it is left forever with a null status.
+            if (p.TryGetProperty("redirectResponse", out var redirect)
+                && _inFlight.TryGetValue(requestId, out var previous))
+            {
+                ApplyResponse(previous, redirect);
+                Complete(previous, p);
+            }
+            // Keep both hops as separate entries; point the correlation at the newest.
             var evicted = Network.Add(entry);
             if (evicted is not null && _inFlight.TryGetValue(evicted.RequestId, out var mapped)
                 && ReferenceEquals(mapped, evicted))
@@ -384,16 +419,16 @@ internal sealed class CdpSession : IAsyncDisposable
     private void OnResponse(JsonElement p)
     {
         var res = p.TryGetProperty("response", out var r) ? r : default;
-        WithEntry(p, e =>
-        {
-            if (res.ValueKind == JsonValueKind.Object)
-            {
-                if (res.TryGetProperty("status", out var s) && s.TryGetInt32(out var status)) e.Status = status;
-                e.MimeType = Str(res, "mimeType");
-                e.FromCache = res.TryGetProperty("fromDiskCache", out var c) && c.ValueKind == JsonValueKind.True;
-                // response.headers is deliberately not read.
-            }
-        });
+        WithEntry(p, e => ApplyResponse(e, res));
+    }
+
+    /// <summary>Copy response METADATA onto an entry. response.headers is never read.</summary>
+    private static void ApplyResponse(NetEntry e, JsonElement res)
+    {
+        if (res.ValueKind != JsonValueKind.Object) return;
+        if (res.TryGetProperty("status", out var s) && s.TryGetInt32(out var status)) e.Status = status;
+        e.MimeType = Str(res, "mimeType");
+        e.FromCache = res.TryGetProperty("fromDiskCache", out var c) && c.ValueKind == JsonValueKind.True;
     }
 
     private void OnFinished(JsonElement p) => WithEntry(p, e =>
