@@ -22,8 +22,12 @@ public sealed class ConsoleSessionService : IDisposable
     public Entry Open(string? shell, int cols, int rows)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        cols = cols <= 0 ? 120 : cols;
-        rows = rows <= 0 ? 30 : rows;
+        // 0/omitted means "use the default"; anything else is clamped to a grid we
+        // can actually allocate (issue #58). Clamp ONCE here so the PTY and the
+        // TerminalScreen are created with identical dimensions — the screen clamps
+        // internally, and a larger PTY would wrap output the screen cannot hold.
+        cols = cols <= 0 ? 120 : TerminalScreen.ClampDimension(cols);
+        rows = rows <= 0 ? 30 : TerminalScreen.ClampDimension(rows);
         shell = string.IsNullOrWhiteSpace(shell)
             ? OperatingSystem.IsWindows() ? "cmd.exe" : Environment.GetEnvironmentVariable("SHELL") ?? "/bin/sh"
             : shell;
@@ -59,6 +63,16 @@ public sealed class ConsoleSessionService : IDisposable
             session.Dispose();
             throw new ObjectDisposedException(nameof(ConsoleSessionService));
         }
+        return entry;
+    }
+
+    /// <summary>Seam for tests: register a fake session so the tool logic can be
+    /// exercised without spawning a real PTY (same pattern as CdpSession's
+    /// RegisterForTest).</summary>
+    internal Entry RegisterForTest(IConsoleSession session, TerminalScreen screen)
+    {
+        var entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
+        _sessions[entry.Id] = entry;
         return entry;
     }
 
@@ -99,8 +113,8 @@ public static class ConsoleTools
     public static async Task<string> ConsoleOpen(
         ConsoleSessionService consoles,
         [Description("Program/command line to run; empty = the OS default shell (cmd.exe, $SHELL).")] string? shell,
-        [Description("Terminal columns (default 120).")] int cols,
-        [Description("Terminal rows (default 30).")] int rows,
+        [Description("Terminal columns (default 120, max 1000).")] int cols,
+        [Description("Terminal rows (default 30, max 1000).")] int rows,
         CancellationToken ct)
     {
         var entry = consoles.Open(shell, cols, rows);
@@ -110,6 +124,8 @@ public static class ConsoleTools
         {
             sessionId = entry.Id,
             shell = entry.Session.Shell,
+            cols = entry.Screen.Cols,
+            rows = entry.Screen.Rows,
             screen = entry.Screen.Render(),
         }, PerceptionTools.Json);
     }
@@ -120,14 +136,16 @@ public static class ConsoleTools
         ConsoleSessionService consoles,
         [Description("Session id from console_open.")] string sessionId,
         [Description("The text to type.")] string text,
-        // No C# default, so an omitted value deserializes to FALSE — the text is typed
-        // but never submitted, which reads as a hung command. Say so rather than
-        // claiming a default that does not exist (issue #57).
-        [Description("Press Enter after the text. PASS THIS EXPLICITLY: omitting it means false, so the text is typed but not submitted.")] bool sendEnter,
-        CancellationToken ct)
+        // The `= true` is what actually makes this optional (issue #57). The SDK puts
+        // a parameter in the schema's `required` list unless it has a C# DEFAULT, and
+        // a missing required argument throws rather than binding null — so nullability
+        // alone did not fix the bug. Nullable on top of the default so an explicit
+        // null also means "yes" instead of failing to bind. Pinned by the schema test.
+        [Description("Press Enter after the text (default true). Pass false to type without submitting.")] bool? sendEnter = true,
+        CancellationToken ct = default)
     {
         var entry = consoles.Get(sessionId);
-        entry.Session.Write(sendEnter ? text + "\r" : text);
+        entry.Session.Write(sendEnter is not false ? text + "\r" : text);
         AuditLog.Append("console_write", $"{sessionId}: {text}", true, "pty");
         await Task.Delay(250, ct); // give the program a beat to react before the usual read
         return JsonSerializer.Serialize(new { ok = true, alive = entry.Session.IsAlive }, PerceptionTools.Json);
@@ -150,7 +168,7 @@ public static class ConsoleTools
     }
 
     [McpServerTool(Name = "console_resize")]
-    [Description("Resize the PTY (TUI apps re-layout).")]
+    [Description("Resize the PTY (TUI apps re-layout). Dimensions are clamped to 2-1000; the reply reports the size actually applied.")]
     public static Task<string> ConsoleResize(
         ConsoleSessionService consoles, string sessionId,
         [Description("New column count.")] int cols,
@@ -158,10 +176,16 @@ public static class ConsoleTools
         CancellationToken ct)
     {
         var entry = consoles.Get(sessionId);
+        // Clamp here too, so the PTY and the screen are told the SAME size — the
+        // screen clamps internally, and a divergent PTY size would mis-wrap output.
+        cols = TerminalScreen.ClampDimension(cols);
+        rows = TerminalScreen.ClampDimension(rows);
         entry.Session.Resize(cols, rows);
         entry.Screen.Resize(cols, rows);
         AuditLog.Append("console_resize", $"{sessionId}: {cols}x{rows}", true, "pty");
-        return Task.FromResult(JsonSerializer.Serialize(new { ok = true }, PerceptionTools.Json));
+        // Report the applied size: a caller that asked for something out of range
+        // needs to know what it actually got.
+        return Task.FromResult(JsonSerializer.Serialize(new { ok = true, cols, rows }, PerceptionTools.Json));
     }
 
     [McpServerTool(Name = "console_close")]
