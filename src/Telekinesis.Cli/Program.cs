@@ -9,6 +9,26 @@ using Telekinesis.Cli;
 // telekinesis setup      → print the platform setup steps (udev rule, TCC, ...) and exit
 // telekinesis probe ...  → exercise the backend from the terminal (VM validation)
 
+// --help / --version, matched on the FIRST argument only (issue #55). First,
+// because everything below either dispatches a subcommand or falls through to the
+// stdio MCP server — which is what used to happen to `telekinesis --help`: it
+// started the server and waited on stdin, indistinguishable from a hang.
+//
+// First-argument-only is deliberate. `telekinesis launch app.exe --help` must
+// forward --help to the launched program, and a one-shot verb's own operands must
+// never be hijacked; the same reasoning as the OneShot dispatch below.
+if (args.FirstOrDefault() is "--help" or "-h" or "-?" or "/?" or "help")
+{
+    Console.WriteLine(Usage.Text);
+    return 0;
+}
+
+if (args.FirstOrDefault() is "--version" or "-v")
+{
+    Console.WriteLine(Usage.Version);
+    return 0;
+}
+
 #if !WINDOWS
 // The dotnet-tool package can only target plain net10.0 (PackAsTool rejects the
 // -windows TFM), but the UIA backend needs the desktop framework. The tool build

@@ -5,10 +5,11 @@ their own guide in [HEADLESS-CLI.md](HEADLESS-CLI.md) — this page is the
 complete surface, including the developer-facing commands that only ever
 appeared as scattered examples before.
 
-> There is currently **no `--help` and no `--version`**. `telekinesis --help`
-> falls through to the stdio MCP server and waits on stdin, which looks like a
-> hang. Use this page instead
-> ([#55](https://github.com/egarim/telekinesis/issues/55) tracks adding them).
+`telekinesis --help` prints a summary of this page and exits 0; `--version`
+prints the version. Both are matched on the **first argument only**, so
+`telekinesis launch app.exe --help` still forwards `--help` to the launched
+program and a one-shot verb's own operands are never hijacked. Accepted spellings:
+`--help`, `-h`, `-?`, `/?`, `help`, and `--version`, `-v`.
 
 ## How arguments are dispatched
 
@@ -61,6 +62,16 @@ including the .NET host's own `--environment` and `--Logging:*` — pass through
 untouched.
 
 ---
+
+## `telekinesis --help` / `--version`
+
+```
+telekinesis --help          # summary of this page, exit 0
+telekinesis --version       # e.g. "telekinesis 0.9.0"
+```
+
+The help text lists the subcommands and one-shot verbs and points back here; it
+is deliberately not a second copy of this reference, because two copies drift.
 
 ## `telekinesis` — stdio MCP server
 
