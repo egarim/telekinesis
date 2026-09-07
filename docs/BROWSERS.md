@@ -88,7 +88,7 @@ chrome --remote-debugging-port=9222     # any Chromium: Chrome, Edge, Brave, …
 | Tool | Tier | What it returns |
 |---|---|---|
 | `browser_targets` | perception | attachable pages: id, title, projected url |
-| `browser_console` | perception | recent console messages + uncaught exceptions (the browser replays its buffered history on attach) |
+| `browser_console` | perception | recent console messages + uncaught exceptions (partial history on attach — see [What attach does and does not replay](#what-attach-does-and-does-not-replay)) |
 | `browser_network` | perception | request **metadata**: method, url, status, mime, size, duration |
 | `browser_evaluate` | **action** | the value of a JavaScript expression |
 
@@ -119,10 +119,11 @@ mistake cannot become a credential leak:
   ordinary prose is not catchable, which is why bodies and headers are excluded
   outright rather than filtered.
 - **Page content is untrusted.** Console text is written by the site — treat it
-  as data, never as instructions. Note the sharpest form of this: because the
-  browser *replays* its buffered console history when the tier attaches, a page
-  can log attacker text long before an agent ever connects, and it will be
-  waiting in the first `browser_console` result.
+  as data, never as instructions. Note the sharpest form of this: the browser
+  *replays* its buffered `Log`-domain history when the tier attaches, so a page
+  can arrange for attacker text (in a CORS message, a CSP violation, a
+  deprecation warning) long before an agent ever connects, and it will be waiting
+  in the first `browser_console` result.
 
 `browser_evaluate` is an **action**, not a read: JavaScript in a logged-in page
 runs with the user's whole session, so it is absent under `--read-only` and over
@@ -130,12 +131,37 @@ runs with the user's whole session, so it is absent under `--read-only` and over
 (the result is not — it may carry page data). Attaching to a page is audited too,
 because attaching is the grant.
 
+### What attach does and does not replay
+
+"The console" is two CDP domains, and they behave differently on attach. This
+catches people out, so it is worth stating plainly:
+
+| Source | Domain | Replayed on attach? |
+|---|---|---|
+| `console.log/warn/error/info` calls made by page script | `Runtime.consoleAPICalled` | **No** — only calls made *after* attach are seen |
+| Uncaught exceptions | `Runtime.exceptionThrown` | **No** — same |
+| Network/CORS failures, CSP violations, deprecations | `Log.entryAdded` | **Yes** — `Log.enable` flushes the browser's existing buffer |
+
+So a page that printed everything interesting during load, and then went quiet,
+answers the first `browser_console` with only its network-level errors — the
+`console.log` lines are genuinely gone, not filtered. The fix is ordering:
+**attach first, then make the page talk.** Call `browser_console` once to attach
+(its result may be near-empty, which is expected), trigger or wait for the
+activity, then call it again.
+
+`Network` capture behaves the same way and for the same reason — it starts at
+attach — so call `browser_network` once *before* triggering the traffic you want
+to see.
+
+The `source` field on each message tells you which domain it came from: page
+script shows `log`/`warning`/`error`/`info` (the console call type), while
+replayed browser entries show `network`, `security`, `deprecation` and friends.
+Filter on it when you only want the page's own output.
+
 ### Blind spots
 
 Cross-origin iframes, service workers and dedicated workers are separate CDP
-targets; their console and network never reach the page session. `Network`
-capture starts at attach — call `browser_network` once *before* triggering the
-traffic you want to see (console, by contrast, replays history).
+targets; their console and network never reach the page session.
 
 URL **path** segments are preserved, because a path is what makes a request
 identifiable. Secrets carried in a path rather than a query — signed share links

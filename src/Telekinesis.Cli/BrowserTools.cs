@@ -38,7 +38,7 @@ public static class BrowserTools
     }
 
     [McpServerTool(Name = "browser_console")]
-    [Description("Read a page's recent console messages and uncaught exceptions (newest first). Attaching replays the browser's buffered history, so messages from before the first call are included.")]
+    [Description("Read a page's recent console messages and uncaught exceptions (newest first). Capture of console.log/warn/error and uncaught exceptions starts AT ATTACH — calls the page made earlier are not replayed and are gone. Browser-level entries (network/CORS failures, CSP violations, deprecations) ARE replayed from the browser's buffer. So call this once to attach, then trigger or wait for the activity, then call it again; the 'source' field says which kind each message is.")]
     public static async Task<string> BrowserConsole(
         CdpSessionService cdp,
         [Description("Target id from browser_targets; empty attaches to the only open page.")] string? targetId,
