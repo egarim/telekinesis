@@ -23,6 +23,32 @@ public class CdpTests
     public void ProjectUrl_keeps_shape_and_drops_secrets(string raw, string expected)
         => Assert.Equal(expected, CdpFormat.ProjectUrl(raw));
 
+    [Theory]
+    // Adversarial finding: the PATH was emitted verbatim, so a secret carried as a
+    // path segment reached the model through a READ tool with no agent intent —
+    // including the very JWT shape that is redacted in console text.
+    [InlineData("https://api.example.com/v1/verify/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.abcdefghij", "eyJhbGci")]
+    [InlineData("https://hooks.slack.com/services/T00000000/B00000000/FAKE-fixture-not-a-token", "FAKE-fixture-not-a-token")]
+    [InlineData("https://discord.com/api/webhooks/1234567890/aBcDeF-secret_webhook_token_value", "aBcDeF-secret_webhook")]
+    [InlineData("https://api.telegram.org/bot7712345678:AAH9xQ-secretBotTokenValue_Zk/sendMessage", "AAH9xQ-secretBot")]
+    public void ProjectUrl_scrubs_secrets_carried_in_the_path(string url, string secretFragment)
+        => Assert.DoesNotContain(secretFragment, CdpFormat.ProjectUrl(url), StringComparison.Ordinal);
+
+    [Theory]
+    // Adversarial bypasses, each proven against the real code before the fix.
+    [InlineData("https://app.example.com/cb?access_token%3Dya29.a0AfH6SMBx7QkR", "ya29.a0AfH6SMBx7QkR")] // no '=' pair was echoed as a NAME
+    [InlineData("//app.example.com/cb?access_token=ya29.a0AfH6SMBx7QkR", "ya29.a0AfH6SMBx7QkR")]        // protocol-relative parsed as file://
+    public void ProjectUrl_closes_query_parsing_bypasses(string url, string secretFragment)
+        => Assert.DoesNotContain(secretFragment, CdpFormat.ProjectUrl(url), StringComparison.Ordinal);
+
+    [Fact]
+    public void Scrub_matches_urls_case_insensitively()
+    {
+        // "HTTPS://" bypassed the embedded-URL pass entirely.
+        var scrubbed = CdpFormat.Scrub("CORS blocked HTTPS://api.example.com/v1?access_token=ya29.a0AfH6SMBx");
+        Assert.DoesNotContain("ya29.a0AfH6SMBx", scrubbed, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ProjectUrl_summarizes_data_uris()
         => Assert.StartsWith("data:text/html,[", CdpFormat.ProjectUrl("data:text/html,<h1>hi</h1>"));
@@ -47,6 +73,11 @@ public class CdpTests
     [InlineData("Cookie: session=hunter2", "hunter2")]
     [InlineData("sid=abc123def", "abc123def")]
     [InlineData("PHPSESSID=zzz111yyy", "zzz111yyy")]
+    // camelCase is the JS-native shape and matched nothing before.
+    [InlineData("sessionToken: 8f3a9c2b1d4e5f60718293a4", "8f3a9c2b1d4e5f60718293a4")]
+    [InlineData("accessToken=ya29.a0AfB_verySecret", "ya29.a0AfB_verySecret")]
+    [InlineData("apiKey=k9secretvalue", "k9secretvalue")]
+    [InlineData("pw: hunter2", "hunter2")]
     public void Scrub_removes_known_secret_shapes(string text, string secretFragment)
     {
         var scrubbed = CdpFormat.Scrub(text);
@@ -59,6 +90,8 @@ public class CdpTests
     [InlineData("consider=5")]        // contains "sid" — must not trip the assignment rule
     [InlineData("president: bob")]
     [InlineData("width=100")]
+    [InlineData("monkey=5")]        // capital-K boundary keeps camelCase safe
+    [InlineData("turnkey=2")]
     public void Scrub_leaves_ordinary_text_alone(string text)
         => Assert.Equal(text, CdpFormat.Scrub(text));
 

@@ -109,7 +109,19 @@ public sealed class CdpSessionService : IAsyncDisposable
         await _gate.WaitAsync(ct);
         try
         {
-            if (_sessions.TryGetValue(target.Id, out var existing) && existing.IsAlive) return existing;
+            if (_sessions.TryGetValue(target.Id, out var existing))
+            {
+                if (existing.IsAlive) return existing;
+                // A closed tab's session must be disposed, not merely replaced —
+                // otherwise the table grows with every tab ever attached.
+                _sessions.Remove(target.Id);
+                await existing.DisposeAsync();
+            }
+            foreach (var (id, dead) in _sessions.Where(kv => !kv.Value.IsAlive).ToList())
+            {
+                _sessions.Remove(id);
+                await dead.DisposeAsync();
+            }
             var session = await CdpSession.ConnectAsync(target, ct);
             _sessions[target.Id] = session;
             // Attaching IS the grant — the one read-path event worth auditing.
@@ -493,6 +505,11 @@ internal sealed class CdpSession : IAsyncDisposable
     internal void Fault(Exception ex)
     {
         _fault ??= ex;   // set BEFORE draining so a racing CallAsync sees it
+        // Cancelling the session token aborts a blocked SendAsync, whose finally
+        // releases the send gate — otherwise a caller parked INSIDE the send (not
+        // yet in _pending) would wait for the full send timeout, and everyone
+        // queued behind the gate with it.
+        try { _cts.Cancel(); } catch (ObjectDisposedException) { /* already torn down */ }
         foreach (var id in _pending.Keys)
             if (_pending.TryRemove(id, out var tcs))
                 tcs.TrySetException(new InvalidOperationException("CDP session closed.", ex));

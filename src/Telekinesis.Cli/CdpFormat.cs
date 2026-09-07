@@ -33,8 +33,13 @@ internal static partial class CdpFormat
             var mime = comma > 5 ? raw[5..comma] : "";
             return Truncate($"data:{mime},[{Math.Max(raw.Length - comma - 1, 0)} bytes]");
         }
+        // A protocol-relative URL ("//host/path?tok=…") parses as ABSOLUTE file://,
+        // which percent-encodes the '?' into the path and skips the query loop below
+        // — and invents a scheme the page never used. Treat it as text.
+        if (raw.StartsWith("//", StringComparison.Ordinal))
+            return Truncate(ScrubPatterns(raw));
         if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
-            return Truncate(Scrub(raw)); // relative/odd scheme: scrub rather than parse
+            return Truncate(ScrubPatterns(raw)); // relative/odd scheme: scrub rather than parse
 
         var sb = new StringBuilder();
         sb.Append(uri.Scheme).Append("://").Append(uri.Host);
@@ -50,12 +55,20 @@ internal static partial class CdpFormat
             {
                 if (!first) sb.Append('&');
                 first = false;
+                // A pair with no '=' is a VALUE, not a name — percent-encoding the
+                // separator (?access_token%3D…) used to echo the whole token as if
+                // it were a parameter name.
                 var eq = pair.IndexOf('=');
-                sb.Append(eq < 0 ? pair : pair[..eq]).Append('=').Append(Redacted);
+                if (eq < 0) sb.Append(Redacted);
+                else sb.Append(pair[..eq]).Append('=').Append(Redacted);
             }
         }
         // uri.Fragment is deliberately never appended.
-        return Truncate(sb.ToString());
+        // The PATH gets the secret patterns too: dropping query values is not enough
+        // when the token is a path segment (Slack/Discord webhooks, Telegram bot
+        // tokens, signed one-time links, /verify/<jwt>). ScrubPatterns — not Scrub —
+        // because Scrub's embedded-URL pre-pass would recurse straight back here.
+        return Truncate(ScrubPatterns(sb.ToString()));
     }
 
     /// <summary>
@@ -74,6 +87,13 @@ internal static partial class CdpFormat
         // (Only absolute http(s) URLs match, and ProjectUrl parses those without
         // calling back here, so there is no recursion.)
         text = EmbeddedUrl().Replace(text, m => ProjectUrl(m.Value));
+        return ScrubPatterns(text);
+    }
+
+    /// <summary>The secret patterns alone — no embedded-URL pass, so
+    /// <see cref="ProjectUrl"/> can call it without recursing.</summary>
+    private static string ScrubPatterns(string text)
+    {
         foreach (var pattern in Patterns)
             text = pattern.Replace(text, Redacted);
         return text;
@@ -88,12 +108,23 @@ internal static partial class CdpFormat
     private static readonly Regex[] Patterns =
     [
         Jwt(), BearerOrBasic(), OpenAiKey(), GitHubToken(), SlackToken(),
-        AwsKeyId(), GoogleKey(), StripeKey(), Pem(), Assignment(),
+        AwsKeyId(), GoogleKey(), StripeKey(), SlackWebhook(), Pem(),
+        Assignment(), CamelAssignment(),
     ];
+
+    /// <summary>camelCase secret keys — sessionToken, accessToken, apiKey. Kept
+    /// case-SENSITIVE so the capital letter is the word boundary: "monkey=1" and
+    /// "turnkey=2" must not match, while "apiKey=…" must.</summary>
+    [GeneratedRegex(@"(?<![A-Za-z0-9])[a-z][A-Za-z0-9]*(?:Token|Secret|Password|Passwd|Key|Session|Sid|Auth)(?![a-z])\s*[:=]\s*(?!\[redacted\])\S+")]
+    private static partial Regex CamelAssignment();
+
+    /// <summary>Webhook/bot URLs whose secret is a PATH segment.</summary>
+    [GeneratedRegex(@"(?i)(?:hooks\.slack\.com/services|discord(?:app)?\.com/api/webhooks)/[A-Za-z0-9_/-]{16,}|/bot\d{6,}:[A-Za-z0-9_-]{20,}")]
+    private static partial Regex SlackWebhook();
 
     /// <summary>An absolute http(s) URL inside free text; stops at whitespace or
     /// the usual quoting/bracketing a message wraps it in.</summary>
-    [GeneratedRegex("""https?://[^\s'"<>)\]}]+""")]
+    [GeneratedRegex("""(?i)https?://[^\s'"<>)\]}]+""")]
     private static partial Regex EmbeddedUrl();
 
     [GeneratedRegex(@"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+")]
@@ -132,7 +163,7 @@ internal static partial class CdpFormat
     /// The value lookahead skips pairs URL projection already redacted, so a
     /// projected query keeps its diagnostically useful parameter NAMES.
     /// </summary>
-    [GeneratedRegex(@"(?i)(?<![A-Za-z0-9])(?:[a-z0-9]+[_-])?(?:password|passwd|secret|token|apikey|api[_-]key|session|sessionid|jsessionid|phpsessid|sid|auth|authorization)(?![a-z0-9])\s*[:=]\s*(?!\[redacted\])\S+")]
+    [GeneratedRegex(@"(?i)(?<![A-Za-z0-9])(?:[a-z0-9]+[_-])?(?:password|passwd|secret|token|apikey|api[_-]key|session|sessionid|jsessionid|phpsessid|sid|auth|authorization|pw|pass)(?![a-z0-9])\s*[:=]\s*(?!\[redacted\])\S+")]
     private static partial Regex Assignment();
 
     /// <summary>

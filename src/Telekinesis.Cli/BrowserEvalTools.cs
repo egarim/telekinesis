@@ -61,9 +61,12 @@ public static class BrowserEvalTools
     private static string Audit(CdpSession session, string expression, bool success, object payload)
     {
         // The expression is recorded; the RESULT never is — it may carry page data.
+        // The expression itself is SCRUBBED first: an agent can embed a token in it
+        // (fetch with an Authorization header), and AuditLog's contract is that
+        // secrets never reach the log file.
         Console.Error.WriteLine(
             $"[telekinesis] {DateTimeOffset.Now:O} browser_evaluate target={session.Url} success={success}");
-        AuditLog.Append("browser_evaluate", $"{session.Url} :: {CdpFormat.Truncate(expression)}", success, "cdp");
+        AuditLog.Append("browser_evaluate", $"{session.Url} :: {CdpFormat.Safe(expression)}", success, "cdp");
         return JsonSerializer.Serialize(payload, PerceptionTools.Json);
     }
 }
