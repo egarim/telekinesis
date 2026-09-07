@@ -149,8 +149,10 @@ shell scripts a 0/1 exit probe for UI conditions. The **headless one-shot CLI**
 (`telekinesis apps|tree|find|read|focused|snapshot|launch|click|click-at|invoke|set-text|type|press`)
 makes every perception and action a single JSON-printing process — drive a desktop over
 plain SSH with no MCP client. On Windows the CLI handles the session-0 trap itself:
-`launch` starts GUI apps in the logged-on user's console session and every other verb
-auto-relays there transparently ([docs/HEADLESS-CLI.md](docs/HEADLESS-CLI.md)). For remote clients,
+`launch` starts GUI apps in the logged-on user's console session, and every other
+**one-shot verb** (plus `assert`) auto-relays there transparently — `probe`, `repl`,
+`run` and `pilot` do *not* relay and must be run from the console session
+([docs/HEADLESS-CLI.md](docs/HEADLESS-CLI.md)). For remote clients,
 `telekinesis serve` speaks MCP over HTTP on localhost — read-only unless started
 with `--enable-actions`, with every action audit-logged to a file. Deployment posture
 and the credential-handoff rule (`fill_credential` — secrets never pass through the

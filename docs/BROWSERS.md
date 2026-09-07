@@ -89,15 +89,35 @@ chrome --remote-debugging-port=9222     # any Chromium: Chrome, Edge, Brave, …
 |---|---|---|
 | `browser_targets` | perception | attachable pages: id, title, projected url |
 | `browser_console` | perception | recent console messages + uncaught exceptions (partial history on attach — see [What attach does and does not replay](#what-attach-does-and-does-not-replay)) |
-| `browser_network` | perception | request **metadata**: method, url, status, mime, size, duration |
+| `browser_network` | perception | request **metadata** — see [the field list](#what-browser_network-actually-returns) |
 | `browser_evaluate` | **action** | the value of a JavaScript expression |
 
 `doctor` reports whether the tier is on and reachable.
 
+### The port itself is the grant — read this first
+
+Everything below describes what *Telekinesis* refuses to do. None of it
+constrains the debugging port you just opened.
+
+`--remote-debugging-port=9222` has **no authentication of any kind**. Any process
+running as you on that machine can attach to the same endpoint and drive the
+browser without restriction: read response bodies, read cookies and
+`localStorage`, dispatch synthetic keystrokes, open new tabs. Reachability *is*
+authorization. The restraints in this section are Telekinesis's policy, not the
+port's — a second client is bound by none of them.
+
+So treat opening the port as a decision, not a setup step:
+
+- open it only for as long as you need it, and close the browser afterwards;
+- prefer a throwaway profile — `--user-data-dir=/tmp/tk-profile` — so the
+  debuggable browser is not the one holding your logged-in sessions;
+- never open it on a shared or multi-user machine.
+
 ### What it will not do
 
-The tier is a *read* tier plus one explicitly-gated action, and it is built so a
-mistake cannot become a credential leak:
+Within that boundary, the tier is a *read* tier plus one explicitly-gated
+action, built so a mistake on Telekinesis's side cannot become a credential
+leak:
 
 - **Off by default.** Without `TELEKINESIS_CDP=1` nothing connects and none of
   these tools are even registered.
@@ -218,6 +238,41 @@ audit-logged, expression included.
   background until the tab closes or the server exits. That is why capture
   "starts at attach" — and why the first call is the cheap way to start
   recording before you trigger anything.
+- **The reported `url` is frozen at attach time.** A session records the target's
+  URL once, when it first attaches, and never refreshes it — it subscribes to no
+  Page-domain events, and a cross-document navigation keeps the same target id
+  and socket. If the tab navigates afterwards, the `url` in every
+  `browser_console` / `browser_network` envelope, in `browser_evaluate`'s stderr
+  line, and in its audit entry all still name the page you attached to, **not**
+  the origin the JavaScript actually ran against. Only the `browser_attach` audit
+  line uses a freshly listed URL. Re-read `browser_targets` if the identity
+  matters.
+
+### What `browser_network` actually returns
+
+Ten fields, not six:
+
+| Field | Meaning |
+|---|---|
+| `method` `url` `resourceType` | as CDP reports them; `url` is projected |
+| `status` | HTTP status, once the response arrives |
+| `mimeType` | from the response |
+| `size` | `encodedDataLength` — **on-the-wire** bytes, not decoded body size |
+| `durationMs` | request start to finish |
+| `fromCache` | `fromDiskCache` only |
+| `failed` | the failure reason string, e.g. `net::ERR_FAILED` |
+| `ts` | when the request started |
+
+Three things that bite:
+
+- **Null fields are omitted entirely** (the serializer drops nulls), so an
+  in-flight request can come back as just `{method, url, resourceType, ts}`.
+  A missing field means "not known yet", never "zero".
+- `size` is only populated at `loadingFinished`, so in-flight and failed requests
+  have none. `fromCache` misses memory-cache hits, which set no `fromDiskCache`.
+- A **redirect chain** appears as several entries sharing one request id; CDP
+  re-fires the request event with the previous hop carried in
+  `redirectResponse`, which is the only place the 3xx status exists.
 
 ### URL projection details
 
@@ -241,9 +296,15 @@ Cross-origin iframes, service workers and dedicated workers are separate CDP
 targets; their console and network never reach the page session.
 
 URL **path** segments are preserved, because a path is what makes a request
-identifiable. Secrets carried in a path rather than a query — signed share links
-(`/s/<token>/…`), magic links, some presigned URLs — therefore survive
-projection. Query values and fragments, where tokens usually live, do not.
+identifiable — but the path is scrubbed for recognizable secret shapes first. A
+JWT segment, a Slack or Discord webhook URL, a Telegram bot token in a path are
+all redacted.
+
+What survives is a path token that matches no known shape: an opaque
+high-entropy string, which is exactly what most signed share links
+(`/s/<token>/…`), magic links and presigned URLs use. **You cannot tell by
+looking whether a given path token was caught**, so assume it may not have been.
+Query values and fragments, where tokens more usually live, are always removed.
 
 ## Worked example
 

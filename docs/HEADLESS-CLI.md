@@ -86,13 +86,27 @@ app never renders. So on Windows the CLI handles both directions itself:
 - **`launch`** routes through a one-shot Scheduled Task (`/IT`), which the Task
   Scheduler starts **in the logged-on user's console session**. No extra privileges
   needed when the SSH user is the logged-on user.
-- **Every other verb auto-relays**: when the CLI detects it is outside the console
-  session, it re-runs the same command line there via a hidden one-shot Scheduled
-  Task (no window flashes on the user's desktop) and streams back stdout, stderr,
-  and the exit code. `ssh winbox telekinesis apps` just works; a `[telekinesis]
+- **Every other one-shot verb auto-relays**: when the CLI detects it is outside the
+  console session, it re-runs the same command line there via a hidden one-shot
+  Scheduled Task (no window flashes on the user's desktop) and streams back stdout,
+  stderr, and the exit code. `ssh winbox telekinesis apps` just works; a `[telekinesis]
   … relaying …` note goes to stderr. A user must be logged on at the console;
   the relay times out after 60 s (`TELEKINESIS_RELAY_TIMEOUT` overrides). Set
   `TELEKINESIS_NO_RELAY=1` to disable.
+
+> **The relay covers the one-shot verbs above, plus `assert`. Nothing else.**
+> `probe`, `repl`, `run` and `pilot` connect to the accessibility backend directly,
+> so over SSH on Windows they run in session 0 and see an **empty tree with no
+> error** — the exact failure this section exists to prevent, silently. Run those
+> from the interactive console session, or drive the machine with the one-shot
+> verbs instead.
+
+Each relayed command writes a scratch directory under
+`%LOCALAPPDATA%\Telekinesis\relay\<guid>` (`run.cmd`, `run.vbs`, `out.txt`,
+`err.txt`, `rc.txt`) and deletes it on the way out. Cleanup is best-effort, so a
+killed CLI leaves it behind — including the relayed command line in `run.cmd`,
+which for `set-text` contains the text you typed. Arguments containing a double
+quote are refused with exit 2 by both the relay and `launch`.
 
 On Linux/macOS, `launch` is a plain child-process start — the CLI exits
 immediately, so the app is reparented and lives on (point `DISPLAY` at the desktop

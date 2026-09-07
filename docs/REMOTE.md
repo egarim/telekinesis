@@ -60,7 +60,19 @@ JSON line to:
   or `%LOCALAPPDATA%\Telekinesis\state\telekinesis\audit.log` (Windows).
 
 Fields: timestamp, tool, target, success, action path. Secrets never appear —
-see below. The stderr line MCP clients already show is unchanged.
+see below.
+
+One tool also echoes a line to **stderr**, separate from the audit file:
+
+```
+[telekinesis] <timestamp> browser_evaluate target=<url> success=<bool>
+```
+
+That matters when stderr is captured into a shared log — the audit file is not
+the only place a `browser_evaluate` call is recorded. The URL is projected, but
+it is the URL captured when the session attached, which may not be the page the
+expression ran against; see
+[BROWSERS.md](BROWSERS.md#parameters-worth-knowing).
 
 ## Credentials — the handoff rule
 
@@ -69,9 +81,21 @@ field **without the secret ever passing through the model, the server, or the
 log**. It focuses the field, then invokes the host credential provider
 configured in `TELEKINESIS_CREDENTIAL_CMD` — typically a password manager's
 auto-type command (KeePassXC auto-type, `op` + a typing bridge, etc.). The
-provider types the value itself; Telekinesis passes only metadata
-(`TK_CRED_FIELD`, `TK_CRED_APP`, `TK_CRED_ELEMENT` env vars) and reports
-success/failure.
+provider types the value itself; Telekinesis passes only metadata, as environment
+variables on the provider process, and reports success/failure.
+
+Those three variables are the whole contract with the command you write, so their
+values matter:
+
+| Variable | Value |
+|---|---|
+| `TK_CRED_FIELD` | the requested field string — `password`, `username`, `totp`, … (whatever the caller asked for) |
+| `TK_CRED_APP` | the Telekinesis **application id**, in the form `pid:N`. **Not** a window title, process name, bundle id or URL |
+| `TK_CRED_ELEMENT` | the target field's accessible Name, or an empty string when it has none |
+
+The middle row is the one that surprises people: a wrapper that tries to match
+vault entries on an application *name* will be handed `pid:4812` and match
+nothing. Map the pid to whatever your vault keys on before you look the entry up.
 
 - No provider configured → the tool returns `available: false` with setup
   guidance. It **never** falls back to typing a secret from model context.
