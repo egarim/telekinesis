@@ -113,12 +113,14 @@ registered at all. Every subcommand, flag and environment variable is in
 
 | OS | Perception | Actions | Status |
 |---|---|---|---|
-| Linux | AT-SPI over D-Bus (Tmds.DBus.Protocol) — list, tree, find, states, bounds, text | AT-SPI Action/EditableText/Value → uinput fallback | perception + actions done; focus/events next |
-| Windows | UI Automation (managed UIA client) — list, tree, find, states, bounds, text | UIA Invoke/Value/Toggle/RangeValue → SendInput fallback | perception + actions + events validated live ([notes](docs/RUNNING-ON-WINDOWS.md)) |
-| macOS | AXAPI | AXPress → CGEvent | planned |
+| Linux | AT-SPI over D-Bus (Tmds.DBus.Protocol) — list, tree, find, states, bounds, text | AT-SPI Action/EditableText/Value → uinput fallback | perception + actions **validated live** on Ubuntu 26.04 / XFCE ([notes](docs/RUNNING-ON-LINUX.md)); focus/events next |
+| Windows | UI Automation (managed UIA client) — list, tree, find, states, bounds, text | UIA Invoke/Value/Toggle/RangeValue → SendInput fallback | perception + actions + events **validated live** ([notes](docs/RUNNING-ON-WINDOWS.md)) |
+| macOS | AXAPI (`AXUIElement`) — list, tree, find, states, bounds, text | AXPress / AXSetAttributeValue → CGEvent fallback | implemented and wired in; awaiting live validation ([notes](docs/RUNNING-ON-MACOS.md)) |
 
-> Actions are implemented against the spec but await runtime testing on a Linux
-> desktop session with `/dev/uinput` access.
+> Linux native actions (AT-SPI `Action`/`EditableText`) are validated against real
+> apps and need no `/dev/uinput`; the uinput **injection fallback** is what still
+> wants a desktop session with `/dev/uinput` access to exercise. See
+> [docs/RUNNING-ON-LINUX.md](docs/RUNNING-ON-LINUX.md#whats-proven-working).
 
 All backends implement `IAccessibilityBackend` from `Telekinesis.Abstractions`, with a
 normalized role/state vocabulary (UIA-modeled); the native role is always preserved in
