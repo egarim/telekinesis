@@ -317,8 +317,10 @@ if (args.Contains("setup"))
           developing. See docs/RUNNING-ON-MACOS.md.
 
         Windows — no setup usually required; run elevated to reach elevated apps.
-          Over SSH you land in session 0 and see no windows; the CLI relays itself into
-          the console session automatically. See docs/HEADLESS-CLI.md.
+          Over SSH you land in session 0 and see no windows. The one-shot verbs (apps,
+          tree, find, click, set-text, ...) and `assert` relay into the console session
+          automatically; probe, repl, run and pilot do NOT — run those at the console.
+          See docs/HEADLESS-CLI.md.
 
         Full command, flag and environment-variable reference: docs/CLI.md
         """);

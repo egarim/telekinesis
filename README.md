@@ -17,9 +17,13 @@ at a fraction of the cost of screenshot-driven computer use.
 dotnet tool install -g Telekinesis
 ```
 
-No .NET on the machine? Grab a self-contained single-file build from the
+No .NET on the machine? Grab a self-contained build from the
 [releases page](https://github.com/egarim/telekinesis/releases) — Windows/Linux/macOS,
-x64 and arm64, no runtime required. (The dotnet-tool route does need the .NET 10
+x64 and arm64, no runtime required. Linux and macOS ship as a single-file `.tar.gz`;
+**Windows ships as a folder `.zip`**, because WPF's UI Automation client cannot
+initialize inside a single-file bundle
+([#26](https://github.com/egarim/telekinesis/issues/26)) — unzip it and run
+`telekinesis.exe` from the folder. (The dotnet-tool route does need the .NET 10
 runtime, plus the Windows Desktop runtime on Windows.)
 
 MCP client config:

@@ -67,13 +67,28 @@ telekinesis apps | tree | find | read | focused | snapshot        # perception
 telekinesis launch | click | click-at | invoke | set-text | type | press
 ```
 
-Full guide: [HEADLESS-CLI.md](HEADLESS-CLI.md). Two details that live only here:
+Every action verb needs `--enable-actions`. Operands are positional, in order —
+`set-text "<query>" "<text>"` is two.
+
+| Flag | Applies to | Default | Effect |
+|---|---|---|---|
+| `--app <id>` | `tree` `find` `read` `snapshot` `click` `invoke` `set-text` | focused app | scope to one application (`pid:N`) |
+| `--depth N` | `tree` | **3** | tree depth |
+| `--scope window\|page\|chrome` | `find` | `window` | restrict to page content or browser UI ([BROWSERS.md](BROWSERS.md#the-three-rules)) |
+| `--button left\|middle\|right` | `click` only | `left` | pointer button; anything else exits 2. `click-at` is always a left click |
+| `--action <name>` | `invoke` | native default | `invoke`, `expand`, `collapse`, `toggle`, `select` |
+| `--enable-actions` | every action verb | — | required, per invocation |
+
+Two parsing rules:
 
 - **`--` ends flag parsing.** Everything after it is a verbatim operand. Use it
   when an operand would otherwise look like a flag.
 - **`launch` forwards everything verbatim** (minus `--enable-actions`) so the
-  launched program's own flags survive. Other verbs strip the known
-  value-taking flags `--app --depth --action --button --scope` and their values.
+  launched program's own flags survive. Other verbs strip the value-taking flags
+  above and their values.
+
+Query syntax (`"Save"`, `"Button:Save"`), the Windows session-0 relay and its
+limits, and worked SSH examples: [HEADLESS-CLI.md](HEADLESS-CLI.md).
 
 ## `telekinesis probe` — exercise the backend from a terminal
 
@@ -239,22 +254,23 @@ changes nothing.
 
 | Variable | Read by | Effect |
 |---|---|---|
-| `TELEKINESIS_CDP` | CDP tier | `1` enables the browser DevTools tier ([BROWSERS.md](BROWSERS.md)) |
+| `TELEKINESIS_CDP` | CDP tier | `1` or `true` enables the browser DevTools tier ([BROWSERS.md](BROWSERS.md)) |
 | `TELEKINESIS_CDP_PORT` | CDP tier | debugging port to attach to (default `9222`) |
 | `TELEKINESIS_CONPTY` | console tier | `1` force-enables the experimental Windows ConPTY path ([CONSOLE.md](CONSOLE.md)) |
 | `TELEKINESIS_CREDENTIAL_CMD` | `fill_credential` | host command that types the secret ([REMOTE.md](REMOTE.md#credentials--the-handoff-rule)) |
-| `TELEKINESIS_SHOW_INTENT` | actions | `1` flashes each injected action's target before the input lands ([XRAY-OVERLAY.md](XRAY-OVERLAY.md)) |
+| `TELEKINESIS_SHOW_INTENT` | actions | `1` or `true` flashes each injected action's target before the input lands ([XRAY-OVERLAY.md](XRAY-OVERLAY.md)) |
 | `TELEKINESIS_NO_RELAY` | Windows relay | `1` disables the console-session relay |
 | `TELEKINESIS_RELAY_TIMEOUT` | Windows relay | relay timeout in seconds (default `60`) |
 | `TELEKINESIS_OMNIPARSER_URL` | vision tier | OmniParser sidecar base URL ([VISION.md](VISION.md)) |
-| `TELEKINESIS_LEARN` | perceptual memory | `1`/`true` records a perceptual anchor per action; opt-in because it costs a region capture each time ([PERCEPTUAL-MEMORY.md](PERCEPTUAL-MEMORY.md)) |
+| `TELEKINESIS_LEARN` | perceptual memory | `1` or `true` records a perceptual anchor per action; opt-in because it costs a region capture each time ([PERCEPTUAL-MEMORY.md](PERCEPTUAL-MEMORY.md)) |
 | `TELEKINESIS_MEMORY_DIR` | perceptual memory | overrides the store (default `%LOCALAPPDATA%/Telekinesis/perceptual-memory`) |
 | `TELEKINESIS_BRAIN_URL` | `pilot` | Ollama-compatible endpoint ([PILOT.md](PILOT.md)) |
 | `TELEKINESIS_BRAIN_MODEL` | `pilot` | default model name |
-| `XDG_STATE_HOME` | audit log | overrides where `telekinesis/audit.log` is written |
+| `XDG_STATE_HOME` | audit log, pilot traces | overrides the state directory — both `telekinesis/audit.log` and the `pilot` trace files land under it |
 | `SHELL` | `console_open` | the default shell on Linux/macOS (falls back to `/bin/sh`) |
 
 That is the complete set — every `GetEnvironmentVariable` call in the tree.
+Boolean-ish variables accept `1` or `true`; anything else reads as off.
 
 `TK_CRED_FIELD`, `TK_CRED_APP` and `TK_CRED_ELEMENT` are set *by* Telekinesis
 for the credential provider it invokes — they are outputs, not settings.

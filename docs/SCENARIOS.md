@@ -28,8 +28,10 @@ Comments and trailing commas are allowed: the parser runs with
 `JsonCommentHandling.Skip` and `AllowTrailingCommas`, so a scenario can be
 annotated inline.
 
-Only `steps` is required. `name` is printed at the start and in the final
-`all N step(s) passed` line.
+Nothing is strictly required: a file with no `steps` parses, runs zero steps and
+**exits 0**. If you generate scenarios, assert that `steps` is non-empty yourself —
+an empty run is indistinguishable from a passing one. `name` is printed at the start
+and in the final `all N step(s) passed` line.
 
 ## Steps
 
@@ -87,6 +89,13 @@ You do not have to assert that an action worked. The runner fails the step when:
 - an action tool returns `Success: false` (the error text is reported), or
 - `assert_element` returns `Ok: false` (reported with the time waited), or
 - a `bind` on an empty array finds nothing to bind.
+
+**One tool escapes this.** With no `TELEKINESIS_CREDENTIAL_CMD` configured,
+`fill_credential` returns `{available: false, message: …}` — not `Success: false` —
+so the runner sees no failure and the step passes. A scenario that relies on a
+credential being filled must assert the effect itself (read the field back, or
+`assert_element` on what should follow), or it will go green on a machine with no
+password manager wired up.
 
 ## Tools available in a scenario
 

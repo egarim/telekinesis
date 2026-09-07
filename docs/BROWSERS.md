@@ -133,7 +133,9 @@ leak:
 - **URLs are projected**: query parameter *names* survive, every *value* becomes
   `[redacted]`, and the `#fragment` — where an OAuth implicit flow puts its token
   — is dropped. This applies to URLs quoted inside console text too, which is
-  exactly how a CORS error leaks one.
+  exactly how a CORS error leaks one. One exception: a **protocol-relative**
+  `//host/path?…#…` is not parsed as a URL at all (see below), so its query values
+  and fragment survive unless a secret pattern matches them.
 - **Text is scrubbed** of known secret shapes. The full set:
 
   | Shape | Matches |
@@ -148,8 +150,8 @@ leak:
   | Stripe | `sk_live_ sk_test_ rk_live_ rk_test_` |
   | PEM blocks | `-----BEGIN … PRIVATE KEY/CERTIFICATE-----` through `-----END-----` |
   | Webhook URLs with the secret in the path | Slack `hooks.slack.com/services/…`, Discord `…/api/webhooks/…`, Telegram `/bot<id>:<token>` |
-  | `key=value` assignments | `password secret token apikey api_key session sessionid jsessionid phpsessid sid auth authorization pw pass`, with an optional `prefix_`, case-insensitive |
-  | camelCase assignments | `…Token …Secret …Password …Key …Session …Sid …Auth` — case-**sensitive** so the capital is the word boundary, which is why `monkey=1` and `turnkey=2` do not match |
+  | `key=value` assignments | `password passwd secret token apikey api_key api-key session sessionid jsessionid phpsessid sid auth authorization pw pass`, each with an optional `prefix_` or `prefix-`, case-insensitive, and `:` accepted as well as `=` |
+  | camelCase assignments | `…Token …Secret …Password …Passwd …Key …Session …Sid …Auth` — case-**sensitive** so the capital is the word boundary, which is why `monkey=1` and `turnkey=2` do not match |
   | URLs embedded in free text | re-projected through the URL rules above |
 
   Best-effort by construction: a secret that looks like ordinary prose is not
@@ -282,7 +284,9 @@ Beyond dropping query values and the fragment, `ProjectUrl` also:
 - summarizes `data:` URIs as `data:<mime>,[N bytes]` rather than echoing them;
 - treats a protocol-relative `//host/path` as text and scrubs it rather than
   resolving it against a base (parsing it would invent a `file://` scheme the
-  page never used, and percent-encode the `?` out of existence);
+  page never used, and percent-encode the `?` out of existence). **This is the one
+  path where query values and the fragment are not stripped** — only pattern
+  scrubbing applies, so `//host/p?t=opaque#tok` survives if nothing matches;
 - replaces a query pair with **no `=` at all** with a bare `[redacted]`, because
   such a pair is a value, not a name — a percent-encoded separator
   (`?access_token%3D…`) would otherwise echo the whole token as if it were a
@@ -304,7 +308,9 @@ What survives is a path token that matches no known shape: an opaque
 high-entropy string, which is exactly what most signed share links
 (`/s/<token>/…`), magic links and presigned URLs use. **You cannot tell by
 looking whether a given path token was caught**, so assume it may not have been.
-Query values and fragments, where tokens more usually live, are always removed.
+Query values and fragments, where tokens more usually live, are removed from every
+URL that parses as absolute — the protocol-relative case noted above is the
+exception.
 
 ## Worked example
 

@@ -48,7 +48,7 @@ every mutating call is audit-logged.
 | Tool | Parameters | Returns |
 |---|---|---|
 | `console_open` | `shell` (empty = `cmd.exe` on Windows, `$SHELL` else `/bin/sh`), `cols` (default 120), `rows` (default 30) | `{sessionId, shell, screen}` |
-| `console_write` | `sessionId`, `text`, `sendEnter` (default true) | `{ok, alive}` |
+| `console_write` | `sessionId`, `text`, `sendEnter` (**no default — see below**) | `{ok, alive}` |
 | `console_read` | `sessionId`, `lines` (0 = whole screen) | `{screen, alive}` |
 | `console_resize` | `sessionId`, `cols`, `rows` | `{ok}` |
 | `console_close` | `sessionId` | `{ok}` |
@@ -78,8 +78,15 @@ returns.
 ### Sending control characters
 
 `console_write` sends literal text, and `sendEnter` appends the Enter key (a
-carriage return). For control characters, put the escape in the JSON string and
-set `sendEnter: false`:
+carriage return).
+
+> **Always pass `sendEnter` explicitly.** It has no default: omitting it sends
+> `false`, so your command is typed at the prompt but never submitted — which
+> reads as a hung command when you `console_read` afterwards
+> ([#57](https://github.com/egarim/telekinesis/issues/57)).
+
+For control characters, put the escape in the JSON string and set
+`sendEnter: false`:
 
 | Key | `text` value |
 |---|---|

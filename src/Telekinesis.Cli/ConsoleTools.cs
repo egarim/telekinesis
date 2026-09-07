@@ -120,7 +120,10 @@ public static class ConsoleTools
         ConsoleSessionService consoles,
         [Description("Session id from console_open.")] string sessionId,
         [Description("The text to type.")] string text,
-        [Description("Press Enter after the text (default true).")] bool sendEnter,
+        // No C# default, so an omitted value deserializes to FALSE — the text is typed
+        // but never submitted, which reads as a hung command. Say so rather than
+        // claiming a default that does not exist (issue #57).
+        [Description("Press Enter after the text. PASS THIS EXPLICITLY: omitting it means false, so the text is typed but not submitted.")] bool sendEnter,
         CancellationToken ct)
     {
         var entry = consoles.Get(sessionId);
