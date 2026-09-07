@@ -15,10 +15,23 @@ telekinesis pilot "..." --app pid:N --dry-run       # plan without executing
 telekinesis pilot-eval <trace.jsonl> --model qwen3:8b   # offline model comparison
 ```
 
-Configuration: `TELEKINESIS_BRAIN_URL` (default `http://localhost:11434` — any
-Ollama-compatible endpoint, including another machine on your LAN) and
-`TELEKINESIS_BRAIN_MODEL` (default `qwen3:4b-instruct`); `--brain-url`/`--model`
-override per run.
+Full flag set:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--app pid:N` | — | **required**; the application to drive |
+| `--max-steps N` | **12** | give up after N planned actions — the runaway-loop bound |
+| `--model <name>` | `TELEKINESIS_BRAIN_MODEL`, else `qwen3:4b-instruct` | brain model |
+| `--brain-url <url>` | `TELEKINESIS_BRAIN_URL`, else `http://localhost:11434` | any Ollama-compatible endpoint, including another machine on your LAN |
+| `--dry-run` | off | plan without executing; the only way to run without `--enable-actions` |
+| `--enable-actions` | — | required unless `--dry-run` |
+
+The goal is the first non-flag argument. Missing goal or missing `--app` exits `2`
+with usage. Exit `0` when the loop reports success, `1` otherwise — and the trace
+file path is printed either way.
+
+`pilot-eval` takes `--model` and `--brain-url` too, and reports steps, agreed,
+invalid, agreement rate and latency (median and p95).
 
 ## The loop
 

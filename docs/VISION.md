@@ -1,4 +1,4 @@
-# The vision tier — screenshot, parse_screen, click_at
+# The vision tier — screenshot, parse_screen, recall_targets, click_at
 
 Accessibility is always the first channel. But there are moments when nothing else
 works: apps that never register on the a11y bus, custom-drawn/canvas UIs (games,
@@ -10,12 +10,21 @@ has a last-resort vision tier:
 2. **`parse_screen`** — screenshot + parse into UI elements via a
    [Microsoft OmniParser](https://github.com/microsoft/OmniParser) sidecar. Returns
    `[{type, content, interactive, bounds}]` with bounds in **screen pixels**.
-3. **`click_at`** — pointer click at raw screen coordinates (action mode only), for
+3. **`recall_targets`** — re-locate the elements this app was successfully acted on
+   before, on the live screen, **without running the parser**. Perception, and far
+   cheaper than a fresh parse: try it first. `show: true` draws what memory believes
+   as X-ray boxes. Backed by [perceptual memory](PERCEPTUAL-MEMORY.md).
+4. **`click_at`** — pointer click at raw screen coordinates (action mode only), for
    targets that have pixel bounds but no element id.
 
 The escalation flow an agent should follow: `find_elements`/`get_tree` →
-(tree empty or wrong) → `screenshot` to look → `parse_screen` to get targets →
-`click_at` to act → re-check with a11y or another screenshot.
+(tree empty or wrong) → `recall_targets` (free if this screen is known) →
+`screenshot` to look → `parse_screen` to get targets → `click_at` to act →
+re-check with a11y or another screenshot.
+
+Pass `applicationId` to `parse_screen` whenever you can: it is what enables the parse
+cache and anchor learning, so the *next* visit to this screen can be answered by
+`recall_targets` instead of the sidecar.
 
 Backends opt into the tier via `IScreenCaptureBackend` / `IPointerInjectionBackend`
 in `Telekinesis.Abstractions`. Windows implements both (GDI capture + SendInput);

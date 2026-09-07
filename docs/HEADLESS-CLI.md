@@ -32,8 +32,36 @@ telekinesis type "<text>"                 # into the focused element
 telekinesis press "<keys>"                # e.g. "ctrl+s", "enter"
 ```
 
-`telekinesis assert` (see the README) is the matching boolean probe — use it after an
-action to wait for the effect.
+`telekinesis assert` is the matching boolean probe — use it after an action to wait for
+the effect:
+
+```
+telekinesis assert [--role <Role>] [--name <name>] [--app X]
+                   [--must-be visible|enabled|…] [--timeout-ms N]   # default 3000
+```
+
+Exit `0` when a match appears within the timeout, `1` otherwise. It is perception, so
+it never needs `--enable-actions` and works in every mode — including against a
+`--read-only` server.
+
+### Flags and operands
+
+The value-taking flags are `--app`, `--depth`, `--action`, `--button` and `--scope`.
+Everything that is not a flag or a flag's value is a positional operand, in order — so
+`set-text "<query>" "<text>"` is two operands.
+
+Two rules worth knowing:
+
+- **`--` means "verbatim from here".** Everything after it is an operand even if it
+  starts with `--`. Use it whenever an operand could be mistaken for a flag:
+  `telekinesis find -- "--verbose"`.
+- **`launch` forwards everything verbatim** (except `--enable-actions`), because the
+  program you are launching has its own flags:
+  `telekinesis launch myapp.exe --port 8080 --enable-actions` passes `--port 8080` to
+  `myapp.exe`, not to Telekinesis.
+
+The complete reference for every subcommand — including `probe`, `repl` and `pilot`,
+which are not one-shot verbs — is [CLI.md](CLI.md).
 
 ## Query addressing
 
