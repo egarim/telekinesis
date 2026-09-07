@@ -326,18 +326,24 @@ if (args.Contains("setup"))
 // safe way (actions need an explicit --enable-actions); stdio is the one that
 // defaults dangerous, so it refuses instead of guessing.
 {
-    var unknown = args.Where(a => a.StartsWith("--", StringComparison.Ordinal) && a != "--read-only").ToList();
-    if (unknown.Count > 0)
+    // Scope: ONLY near-misses of the safety flag itself. Rejecting every unknown
+    // --flag would also reject the Generic Host's own config arguments
+    // (--environment, --Logging:LogLevel:Default …), which Host
+    // .CreateApplicationBuilder(args) below legitimately consumes — so unrelated
+    // arguments keep passing through exactly as before, and only the dangerous
+    // ambiguity is refused.
+    static string Canonical(string s) =>
+        s.TrimStart('-', '/').Split('=')[0].Replace("-", "").Replace("_", "").ToLowerInvariant();
+
+    var nearMiss = args.FirstOrDefault(a => a != "--read-only" && Canonical(a) == "readonly");
+    if (nearMiss is not null)
     {
-        Console.Error.WriteLine($"Unknown option(s): {string.Join(", ", unknown)}");
-        // Near-misses of the safety flag are the whole reason this guard exists.
-        static string Canonical(string s) => s.TrimStart('-').Replace("-", "").Replace("_", "").ToLowerInvariant();
-        if (unknown.Any(u => Canonical(u) is "readonly" or "readonl" or "raedonly"))
-            Console.Error.WriteLine("Did you mean --read-only?");
+        // Catches --readonly, --read_only, -read-only, /read-only, --READ-ONLY and
+        // --read-only=false — every one of which used to be silently ignored, which
+        // meant starting with actions ENABLED.
+        Console.Error.WriteLine($"Unrecognized option '{nearMiss}'. Did you mean --read-only?");
         Console.Error.WriteLine(
-            "Usage: telekinesis [--read-only]\n"
-            + "Subcommands: doctor | setup | probe | repl | run | pilot | pilot-eval | assert | serve | memory,\n"
-            + "plus the one-shot verbs (apps, tree, find, read, focused, snapshot, launch, click, …) — see docs/HEADLESS-CLI.md.");
+            "Refusing to start rather than silently running with actions enabled (issue #52).");
         return 2;
     }
 }

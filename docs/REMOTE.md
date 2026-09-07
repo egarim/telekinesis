@@ -23,10 +23,13 @@ Remote posture defaults to perception:
 | `telekinesis serve --sse` | yes | **no — read-only by default** |
 | `telekinesis serve --sse --enable-actions` | yes | yes |
 
-`--read-only` always wins, and the stdio server **refuses an unrecognized
-`--flag`** rather than ignoring it (issue #52): a typo'd `--readonly` would
-otherwise start it in full action mode, which is exactly backwards from the
-operator's intent.
+`--read-only` always wins, and the stdio server **refuses to start on a
+near-miss of that flag** rather than ignoring it (issue #52) — `--readonly`,
+`--read_only`, `-read-only`, `--read-only=false` and friends all exit 2 with a
+hint. Silently dropping such a typo would start the server in full action mode,
+exactly backwards from the operator's intent. Unrelated arguments (including the
+.NET host's own `--environment` / `--Logging:*` config args) pass through
+untouched.
 
 The `assert_element` tool is classified as perception (it only polls the tree)
 and is available in every mode.
