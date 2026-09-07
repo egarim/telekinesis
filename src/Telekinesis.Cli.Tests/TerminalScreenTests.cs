@@ -103,4 +103,62 @@ public class UnixPtySessionTests
         Assert.True(entry.Session.IsAlive);
         consoles.Close(entry.Id);
     }
+
+    // ---- dimension clamping (issue #58) ----
+    // The grid is allocated up front, so an unbounded size is an out-of-memory
+    // switch. These pin BOTH ends of the range and, critically, that the reported
+    // dimensions match the grid actually allocated.
+
+    [Fact]
+    public void Absurd_size_is_clamped_instead_of_allocating()
+    {
+        var screen = new TerminalScreen(100_000, 100_000);
+        Assert.Equal(TerminalScreen.MaxDimension, screen.Cols);
+        Assert.Equal(TerminalScreen.MaxDimension, screen.Rows);
+    }
+
+    [Fact]
+    public void Absurd_resize_is_clamped()
+    {
+        var screen = new TerminalScreen(80, 24);
+        screen.Resize(100_000, 100_000);
+        Assert.Equal(TerminalScreen.MaxDimension, screen.Cols);
+        Assert.Equal(TerminalScreen.MaxDimension, screen.Rows);
+    }
+
+    [Fact]
+    public void Tiny_and_negative_sizes_are_clamped_up()
+    {
+        var screen = new TerminalScreen(-5, 0);
+        Assert.Equal(TerminalScreen.MinDimension, screen.Cols);
+        Assert.Equal(TerminalScreen.MinDimension, screen.Rows);
+        screen.Resize(1, -1);
+        Assert.Equal(TerminalScreen.MinDimension, screen.Cols);
+        Assert.Equal(TerminalScreen.MinDimension, screen.Rows);
+    }
+
+    [Fact]
+    public void Ordinary_sizes_pass_through_untouched()
+    {
+        var screen = new TerminalScreen(120, 30);
+        Assert.Equal(120, screen.Cols);
+        Assert.Equal(30, screen.Rows);
+        screen.Resize(200, 50);
+        Assert.Equal(200, screen.Cols);
+        Assert.Equal(50, screen.Rows);
+    }
+
+    [Fact]
+    public void Clamped_grid_still_renders_and_wraps_at_the_clamped_width()
+    {
+        // The reported width must be the width the grid really has: if Cols said
+        // 100000 while the grid held 1000, writing would run off the end.
+        var screen = new TerminalScreen(100_000, 4);
+        var line = new string('x', TerminalScreen.MaxDimension + 50);
+        var bytes = Encoding.UTF8.GetBytes(line);
+        screen.Feed(bytes, bytes.Length);
+        var rendered = screen.Render().Split('\n');
+        Assert.Equal(TerminalScreen.MaxDimension, rendered[0].Length);
+        Assert.Equal(50, rendered[1].Length);
+    }
 }

@@ -16,8 +16,27 @@ public sealed class TerminalScreen
     private readonly List<char[]> _scrollback = [];
     private const int ScrollbackCap = 2000;
 
+    /// <summary>Smallest usable grid — a 1x1 or negative size must not leave the
+    /// grid smaller than the recorded dimensions.</summary>
+    public const int MinDimension = 2;
+
+    /// <summary>Largest grid in either direction (issue #58). The whole grid is
+    /// allocated up front, so an unbounded size is an out-of-memory switch: 100000
+    /// x 100000 asks for ten billion cells. No real terminal is near 1000, and the
+    /// caller here is a model that can emit an absurd number.</summary>
+    public const int MaxDimension = 1000;
+
+    /// <summary>Clamp a requested dimension into the supported range.</summary>
+    public static int ClampDimension(int value) =>
+        Math.Clamp(value, MinDimension, MaxDimension);
+
     private char[][] _grid;
     private int _cols, _rows, _cx, _cy;
+
+    /// <summary>The grid dimensions actually in use — after clamping, which is what
+    /// a caller that asked for something out of range needs to see.</summary>
+    public int Cols { get { lock (_gate) return _cols; } }
+    public int Rows { get { lock (_gate) return _rows; } }
 
     // Sequence-parser state: CSI/OSC/ESC accumulate across Feed() chunk boundaries.
     private enum Mode { Text, Esc, Csi, Osc }
@@ -27,8 +46,8 @@ public sealed class TerminalScreen
 
     public TerminalScreen(int cols = 120, int rows = 30)
     {
-        _cols = Math.Max(cols, 2);
-        _rows = Math.Max(rows, 2);
+        _cols = ClampDimension(cols);
+        _rows = ClampDimension(rows);
         _grid = NewGrid(_cols, _rows);
     }
 
@@ -49,9 +68,10 @@ public sealed class TerminalScreen
     public void Resize(int cols, int rows)
     {
         // Clamp BEFORE allocating so the grid dimensions always match _cols/_rows —
-        // a 1x1 (or negative) resize must not leave a grid smaller than recorded.
-        cols = Math.Max(cols, 2);
-        rows = Math.Max(rows, 2);
+        // a 1x1 (or negative) resize must not leave a grid smaller than recorded,
+        // and an enormous one must not allocate the whole grid before failing (#58).
+        cols = ClampDimension(cols);
+        rows = ClampDimension(rows);
         lock (_gate)
         {
             // ponytail: rebuild and copy what fits; full reflow is a TUI luxury the

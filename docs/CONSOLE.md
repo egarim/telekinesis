@@ -47,10 +47,10 @@ every mutating call is audit-logged.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `console_open` | `shell` (empty = `cmd.exe` on Windows, `$SHELL` else `/bin/sh`), `cols` (default 120), `rows` (default 30) | `{sessionId, shell, screen}` |
-| `console_write` | `sessionId`, `text`, `sendEnter` (**no default — see below**) | `{ok, alive}` |
+| `console_open` | `shell` (empty = `cmd.exe` on Windows, `$SHELL` else `/bin/sh`), `cols` (default 120), `rows` (default 30) | `{sessionId, shell, cols, rows, screen}` |
+| `console_write` | `sessionId`, `text`, `sendEnter` (default **true**) | `{ok, alive}` |
 | `console_read` | `sessionId`, `lines` (0 = whole screen) | `{screen, alive}` |
-| `console_resize` | `sessionId`, `cols`, `rows` (min 2, **no maximum**) | `{ok}` |
+| `console_resize` | `sessionId`, `cols`, `rows` (clamped to 2–1000) | `{ok, cols, rows}` |
 | `console_close` | `sessionId` | `{ok}` |
 | `console_list` | — | `[{sessionId, shell, alive, opened}]` |
 
@@ -69,11 +69,11 @@ the session's `cols`×`rows` screen buffer (120×30 by default), so:
   reads correctly, which is the whole point of rendering rather than
   concatenating.
 
-Sizes are clamped to a minimum of 2×2 but have **no upper bound**, and a resize
-allocates the whole grid up front — `console_resize(100000, 100000)` asks for a
-ten-billion-cell array and will exhaust memory
-([#58](https://github.com/egarim/telekinesis/issues/58)). Keep it to real terminal
-sizes.
+Sizes are clamped to **2–1000** in each direction, because the grid is allocated
+up front and an unbounded size would be an out-of-memory switch
+([#58](https://github.com/egarim/telekinesis/issues/58)). `console_open` and
+`console_resize` both report the dimensions actually applied, so a request outside
+the range tells you what you got rather than failing silently.
 
 `console_open` waits 300 ms before returning so the shell has painted its
 banner and prompt; `console_write` waits 250 ms so the program has a beat to
@@ -84,15 +84,12 @@ returns.
 ### Sending control characters
 
 `console_write` sends literal text, and `sendEnter` appends the Enter key (a
-carriage return).
+carriage return). It **defaults to true**, so a plain `{sessionId, text}` call
+submits the command — which is what you want for running something, and why the
+default is that way round ([#57](https://github.com/egarim/telekinesis/issues/57)).
 
-> **Always pass `sendEnter` explicitly.** It has no default: omitting it sends
-> `false`, so your command is typed at the prompt but never submitted — which
-> reads as a hung command when you `console_read` afterwards
-> ([#57](https://github.com/egarim/telekinesis/issues/57)).
-
-For control characters, put the escape in the JSON string and set
-`sendEnter: false`:
+Pass `sendEnter: false` when you are answering a prompt that reads a single
+keypress, or sending a control character:
 
 | Key | `text` value |
 |---|---|
