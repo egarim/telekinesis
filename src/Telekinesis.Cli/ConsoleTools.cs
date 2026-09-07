@@ -66,6 +66,16 @@ public sealed class ConsoleSessionService : IDisposable
         return entry;
     }
 
+    /// <summary>Seam for tests: register a fake session so the tool logic can be
+    /// exercised without spawning a real PTY (same pattern as CdpSession's
+    /// RegisterForTest).</summary>
+    internal Entry RegisterForTest(IConsoleSession session, TerminalScreen screen)
+    {
+        var entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
+        _sessions[entry.Id] = entry;
+        return entry;
+    }
+
     public Entry Get(string id) =>
         _sessions.TryGetValue(id, out var e)
             ? e
@@ -126,12 +136,13 @@ public static class ConsoleTools
         ConsoleSessionService consoles,
         [Description("Session id from console_open.")] string sessionId,
         [Description("The text to type.")] string text,
-        // Nullable so an OMITTED value is distinguishable from an explicit false and
-        // can default to true (issue #57). A plain `bool` deserialized to false when
-        // omitted, so the command was typed but never submitted — which reads as a
-        // hung session. Same idiom as ActionTools' `string? button`.
-        [Description("Press Enter after the text (default true). Pass false to type without submitting.")] bool? sendEnter,
-        CancellationToken ct)
+        // The `= true` is what actually makes this optional (issue #57). The SDK puts
+        // a parameter in the schema's `required` list unless it has a C# DEFAULT, and
+        // a missing required argument throws rather than binding null — so nullability
+        // alone did not fix the bug. Nullable on top of the default so an explicit
+        // null also means "yes" instead of failing to bind. Pinned by the schema test.
+        [Description("Press Enter after the text (default true). Pass false to type without submitting.")] bool? sendEnter = true,
+        CancellationToken ct = default)
     {
         var entry = consoles.Get(sessionId);
         entry.Session.Write(sendEnter is not false ? text + "\r" : text);
