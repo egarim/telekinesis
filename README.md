@@ -68,6 +68,14 @@ MCP client config:
   Blazor is supported via `Telekinesis.Medium.Blazor` (note: Blazor *Server* circuits
   can publish semantics but resist synthetic input — use WebAssembly to be driven).
   See [docs/MEDIUM.md](docs/MEDIUM.md).
+- **Interactive terminals** — not everything an agent needs has a GUI. `console_open`
+  starts a persistent session in a **real PTY**, `console_write` types into it and
+  `console_read` returns the *rendered screen* — ANSI applied, so a progress bar or a
+  full TUI reads the way a human sees it, not as a stream of escape bytes. The
+  working directory, the environment, an ssh hop and a half-typed REPL expression all
+  survive between calls. Action tier, audit-logged; Linux/macOS supported, Windows
+  behind `TELEKINESIS_CONPTY=1` until the ConPTY child-attach bug clears.
+  See [docs/CONSOLE.md](docs/CONSOLE.md).
 - **X-ray overlay** — see what the AI sees, on the real desktop: `highlight` boxes an
   element, `probe --overlay` draws live labeled boxes over a whole app, and
   `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
