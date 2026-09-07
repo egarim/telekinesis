@@ -31,12 +31,13 @@ MCP client config:
 ## Modes
 
 - **Clairvoyant mode** (`telekinesis --read-only`) — perception only: `list_applications`,
-  `get_tree`, `find_elements`, `read_element`, `get_focused`. Safe to expose; needs no
-  input permissions. Password-field content is never exposed.
-- **Telekinesis mode** (default) — adds actions: `invoke`, `set_text`, `click`,
-  `type_text`, `press_keys`, `click_at`. Each action tries the native accessibility
-  action first and falls back to OS input injection, reporting which path ran. Every
-  action is audit-logged.
+  `get_tree`, `find_elements`, `read_element`, `read_page`, `get_focused`, `wait_for`,
+  `assert_element`, `highlight`. Safe to expose; needs no input permissions.
+  Password-field content is never exposed.
+- **Telekinesis mode** (default) — adds actions: `invoke`, `set_text`, `set_value`,
+  `click`, `click_at`, `type_text`, `press_keys`, `navigate`, `fill_credential`. Each
+  action tries the native accessibility action first and falls back to OS input
+  injection, reporting which path ran. Every action is audit-logged.
 - **Vision tier** (last resort) — for the moments when the accessibility tree fails:
   `screenshot` captures pixels, `parse_screen` turns them into clickable elements via
   an optional [OmniParser](https://github.com/microsoft/OmniParser) sidecar, and
@@ -86,6 +87,27 @@ MCP client config:
 *The X-ray overlay over Calculator — every element the ghost can see, boxed and labeled
 live; then it computes 7+7 with each click telegraphed
 ([video](docs/media/xray-overlay-demo.mp4)).*
+
+## Every tool
+
+All 31 MCP tools, by tier. **Perception** loads in every mode, including
+`--read-only` and over `serve` without `--enable-actions`; **action** needs
+actions enabled.
+
+| Tier | Tools |
+|---|---|
+| Perception — tree | `list_applications` `get_tree` `find_elements` `read_element` `get_focused` `wait_for` `assert_element` `highlight` |
+| Perception — browsers | `read_page` |
+| Perception — vision | `screenshot` `parse_screen` `recall_targets` |
+| Perception — CDP *(opt-in)* | `browser_targets` `browser_console` `browser_network` |
+| Action — input | `invoke` `set_text` `set_value` `click` `click_at` `type_text` `press_keys` `navigate` |
+| Action — credentials | `fill_credential` |
+| Action — console | `console_open` `console_write` `console_read` `console_resize` `console_close` `console_list` |
+| Action — CDP *(opt-in)* | `browser_evaluate` |
+
+The two opt-in rows need `TELEKINESIS_CDP=1`; without it those tools are not
+registered at all. Every subcommand, flag and environment variable is in
+[docs/CLI.md](docs/CLI.md).
 
 ## Platform backends
 
