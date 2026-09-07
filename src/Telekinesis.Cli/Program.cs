@@ -319,6 +319,37 @@ if (args.Contains("setup"))
     return 0;
 }
 
+// Nothing below here is a subcommand: this is the stdio MCP server, whose only
+// option is --read-only. An unrecognized flag must NOT be ignored (issue #52) —
+// silently dropping a typo'd `--readonly` starts the server in FULL ACTION mode
+// when the operator plainly meant the opposite. `serve --sse` already fails the
+// safe way (actions need an explicit --enable-actions); stdio is the one that
+// defaults dangerous, so it refuses instead of guessing.
+{
+    // Scope: ONLY near-misses of the safety flag itself. Rejecting every unknown
+    // --flag would also reject the Generic Host's own config arguments
+    // (--environment, --Logging:LogLevel:Default …), which Host
+    // .CreateApplicationBuilder(args) below legitimately consumes — so unrelated
+    // arguments keep passing through exactly as before, and only the dangerous
+    // ambiguity is refused.
+    // Keep only the letters: every prefix and separator a typo can use (- _ . /
+    // and the em-dash a README paste leaves behind) falls out at once.
+    static string Canonical(string s) =>
+        new string(s.Split('=')[0].Where(char.IsAsciiLetter).ToArray()).ToLowerInvariant();
+
+    var nearMiss = args.FirstOrDefault(a => a != "--read-only" && Canonical(a) == "readonly");
+    if (nearMiss is not null)
+    {
+        // Catches --readonly, --read_only, --read.only, -read-only, /read-only,
+        // —read-only, --READ-ONLY and --read-only=false — every one of which used to
+        // be silently ignored, which meant starting with actions ENABLED.
+        Console.Error.WriteLine($"Unrecognized option '{nearMiss}'. Did you mean --read-only?");
+        Console.Error.WriteLine(
+            "Refusing to start rather than silently running with actions enabled (issue #52).");
+        return 2;
+    }
+}
+
 var readOnly = args.Contains("--read-only");
 
 var builder = Host.CreateApplicationBuilder(args);
