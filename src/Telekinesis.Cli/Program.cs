@@ -319,6 +319,29 @@ if (args.Contains("setup"))
     return 0;
 }
 
+// Nothing below here is a subcommand: this is the stdio MCP server, whose only
+// option is --read-only. An unrecognized flag must NOT be ignored (issue #52) —
+// silently dropping a typo'd `--readonly` starts the server in FULL ACTION mode
+// when the operator plainly meant the opposite. `serve --sse` already fails the
+// safe way (actions need an explicit --enable-actions); stdio is the one that
+// defaults dangerous, so it refuses instead of guessing.
+{
+    var unknown = args.Where(a => a.StartsWith("--", StringComparison.Ordinal) && a != "--read-only").ToList();
+    if (unknown.Count > 0)
+    {
+        Console.Error.WriteLine($"Unknown option(s): {string.Join(", ", unknown)}");
+        // Near-misses of the safety flag are the whole reason this guard exists.
+        static string Canonical(string s) => s.TrimStart('-').Replace("-", "").Replace("_", "").ToLowerInvariant();
+        if (unknown.Any(u => Canonical(u) is "readonly" or "readonl" or "raedonly"))
+            Console.Error.WriteLine("Did you mean --read-only?");
+        Console.Error.WriteLine(
+            "Usage: telekinesis [--read-only]\n"
+            + "Subcommands: doctor | setup | probe | repl | run | pilot | pilot-eval | assert | serve | memory,\n"
+            + "plus the one-shot verbs (apps, tree, find, read, focused, snapshot, launch, click, …) — see docs/HEADLESS-CLI.md.");
+        return 2;
+    }
+}
+
 var readOnly = args.Contains("--read-only");
 
 var builder = Host.CreateApplicationBuilder(args);

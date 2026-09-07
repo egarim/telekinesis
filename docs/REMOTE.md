@@ -23,8 +23,13 @@ Remote posture defaults to perception:
 | `telekinesis serve --sse` | yes | **no — read-only by default** |
 | `telekinesis serve --sse --enable-actions` | yes | yes |
 
-`--read-only` always wins. The `assert_element` tool is classified as perception
-(it only polls the tree) and is available in every mode.
+`--read-only` always wins, and the stdio server **refuses an unrecognized
+`--flag`** rather than ignoring it (issue #52): a typo'd `--readonly` would
+otherwise start it in full action mode, which is exactly backwards from the
+operator's intent.
+
+The `assert_element` tool is classified as perception (it only polls the tree)
+and is available in every mode.
 
 The optional CDP browser tier follows the same gate: its read tools
 (`browser_targets`, `browser_console`, `browser_network`) are perception, while
