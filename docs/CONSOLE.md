@@ -33,7 +33,7 @@ TELEKINESIS_CONPTY=1 telekinesis        # opt into the experimental Windows path
 ```
 
 Set it only if you are testing on a Windows build where child-attach works, and
-never over `serve --sse` where a corrupted stream is harder to notice.
+never over `serve` where a corrupted stream is harder to notice.
 
 On Windows the tier also needs the `net10.0-windows` target — a portable build
 throws `"This build does not include ConPTY"`.
@@ -41,7 +41,7 @@ throws `"This build does not include ConPTY"`.
 ## Tools
 
 Every one of these is in the **action** tier: they are absent under
-`--read-only` and over `serve --sse` without `--enable-actions`. Typing into a
+`--read-only` and over `serve` without `--enable-actions`. Typing into a
 shell is arbitrary code execution, so it is gated exactly like `click` is, and
 every mutating call is audit-logged.
 
@@ -120,7 +120,7 @@ execution as whoever runs the server — there is no allowlist, no sandbox, and 
 confirmation prompt. The protections are the ones that apply to every action:
 
 - absent entirely under `--read-only`;
-- absent over `serve --sse` unless you passed `--enable-actions`;
+- absent over `serve` unless you passed `--enable-actions`;
 - every `console_open`, `console_write`, `console_resize` and `console_close`
   appended to the audit log (see [REMOTE.md](REMOTE.md#audit-log)), with the
   written text recorded — so **do not type secrets into a console session**, use

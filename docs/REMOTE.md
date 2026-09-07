@@ -7,7 +7,10 @@ conservative.
 
 - **stdio (default)** — `telekinesis`. The MCP client owns the process; nothing
   listens on the network. This is the recommended mode everywhere it fits.
-- **HTTP/SSE** — `telekinesis serve --sse --port 3001`. Binds **127.0.0.1 only**.
+- **HTTP/SSE** — `telekinesis serve --port 3001` (port defaults to 3001). Binds
+  **127.0.0.1 only**. Older examples write `serve --sse`; `--sse` was never a
+  real flag — the code does not look for it — so it is accepted and ignored, and
+  plain `serve` is the HTTP/SSE server.
   For anything beyond the local machine, put it behind an *authenticated tunnel*
   (the Lun.Os tunnel, an SSH -L forward, or a reverse proxy that terminates auth).
   Never expose the port itself; there is intentionally no listen-on-0.0.0.0 flag.
@@ -20,16 +23,22 @@ Remote posture defaults to perception:
 |---|---|---|
 | `telekinesis` (stdio) | yes | yes (unless `--read-only`) |
 | `telekinesis --read-only` | yes | no |
-| `telekinesis serve --sse` | yes | **no — read-only by default** |
-| `telekinesis serve --sse --enable-actions` | yes | yes |
+| `telekinesis serve` | yes | **no — read-only by default** |
+| `telekinesis serve --enable-actions` | yes | yes |
 
-`--read-only` always wins, and the stdio server **refuses to start on a
-near-miss of that flag** rather than ignoring it (issue #52) — `--readonly`,
-`--read_only`, `-read-only`, `--read-only=false` and friends all exit 2 with a
-hint. Silently dropping such a typo would start the server in full action mode,
-exactly backwards from the operator's intent. Unrelated arguments (including the
-.NET host's own `--environment` / `--Logging:*` config args) pass through
-untouched.
+**`--read-only` applies to the stdio server only.** That is the one transport
+that is full-power by default, so it is the one that needs taking power away.
+`serve` decides purely on `--enable-actions` and never reads `--read-only` — so
+`serve --read-only --enable-actions` serves *actions*. Do not use `--read-only`
+to make `serve` safe; it already is, unless you ask otherwise.
+
+Because stdio defaults dangerous, it **refuses to start on a near-miss of that
+flag** rather than ignoring it (issue #52) — `--readonly`, `--read_only`,
+`--read.only`, `-read-only`, `/read-only`, `--READ-ONLY`, `--read-only=false`
+and an em-dashed `—read-only` paste all exit 2 with a hint. Silently dropping
+such a typo would start the server in full action mode, exactly backwards from
+the operator's intent. Unrelated arguments (including the .NET host's own
+`--environment` / `--Logging:*` config args) pass through untouched.
 
 The `assert_element` tool is classified as perception (it only polls the tree)
 and is available in every mode.
@@ -37,7 +46,7 @@ and is available in every mode.
 The optional CDP browser tier follows the same gate: its read tools
 (`browser_targets`, `browser_console`, `browser_network`) are perception, while
 `browser_evaluate` is an action — absent under `--read-only` and over
-`serve --sse` without `--enable-actions`. The tier's own rules (opt-in,
+`serve` without `--enable-actions`. The tier's own rules (opt-in,
 loopback-only, no headers or bodies) live in
 [docs/BROWSERS.md](BROWSERS.md#the-cdp-tier--console-network-and-js).
 

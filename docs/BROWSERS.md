@@ -127,7 +127,7 @@ mistake cannot become a credential leak:
 
 `browser_evaluate` is an **action**, not a read: JavaScript in a logged-in page
 runs with the user's whole session, so it is absent under `--read-only` and over
-`serve --sse` without `--enable-actions`, and every expression is audit-logged
+`serve` without `--enable-actions`, and every expression is audit-logged
 (the result is not — it may carry page data). Attaching to a page is audited too,
 because attaching is the grant.
 
