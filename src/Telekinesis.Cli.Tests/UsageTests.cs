@@ -89,4 +89,80 @@ public class UsageTests
         Assert.DoesNotContain("+", v);
         Assert.DoesNotContain("unknown", v);
     }
+
+    // ---- help detection (issue #55, and the regression it caused) ----
+    // This logic shipped a silent false green in the project's own CI gate:
+    // `assert --name help` printed usage and exited 0 instead of running the
+    // assertion. These pin the rule in both directions.
+
+    private static bool IsHelp(params string[] args) =>
+        Usage.IsHelpRequest(args, OneShot.CanHandle);
+
+    [Theory]
+    [InlineData("--help")]
+    [InlineData("-h")]
+    [InlineData("-?")]
+    [InlineData("/?")]
+    [InlineData("help")]
+    public void A_help_word_first_is_always_help(string word)
+        => Assert.True(IsHelp(word));
+
+    [Theory]
+    // After a subcommand: the form a human actually types.
+    [InlineData("serve", "--help")]
+    [InlineData("serve", "help")]
+    [InlineData("repl", "-?")]
+    [InlineData("doctor", "/?")]
+    [InlineData("memory", "-h")]
+    // After a flag that takes no value, it is still a help request.
+    [InlineData("serve", "--enable-actions", "--help")]
+    // After a flag's VALUE, which is not a flag, it is still help.
+    [InlineData("serve", "--port", "3001", "--help")]
+    public void Help_after_a_subcommand_is_help(params string[] args)
+        => Assert.True(IsHelp(args));
+
+    [Theory]
+    // THE REGRESSION. --name is a case-insensitive substring query, so these are
+    // ordinary CI assertions; hijacking them turned exit 1 into a silent exit 0.
+    [InlineData("assert", "--role", "Button", "--name", "help")]
+    [InlineData("assert", "--name", "--help")]
+    [InlineData("assert", "--name", "-h")]
+    [InlineData("assert", "--role", "Button", "--name", "-?")]
+    // Same shape elsewhere: typing or searching for the literal string.
+    [InlineData("probe", "--type", "--help")]
+    [InlineData("probe", "--find", "help")]
+    [InlineData("pilot", "--model", "-h")]
+    public void A_help_word_in_a_flags_value_position_is_a_value(params string[] args)
+        => Assert.False(IsHelp(args));
+
+    [Theory]
+    // One-shot verbs own their whole line: launch forwards operands to the child,
+    // and no verb's operands may be hijacked.
+    [InlineData("launch", "--help")]
+    [InlineData("apps", "--help")]
+    [InlineData("apps", "help")]
+    [InlineData("find", "-?")]
+    public void A_one_shot_verb_owns_its_arguments(params string[] args)
+        => Assert.False(IsHelp(args));
+
+    [Theory]
+    [InlineData("serve")]
+    [InlineData("doctor")]
+    [InlineData("--read-only")]
+    public void Ordinary_invocations_are_not_help(params string[] args)
+        => Assert.False(IsHelp(args));
+
+    [Fact]
+    public void No_arguments_is_not_help()
+        => Assert.False(IsHelp());
+
+    [Theory]
+    [InlineData("--version")]
+    [InlineData("-v")]
+    public void Version_is_first_argument_only(string word)
+    {
+        Assert.True(Usage.IsVersionRequest([word]));
+        // Not a version request buried later — it could be a flag's value.
+        Assert.False(Usage.IsVersionRequest(["assert", "--name", word]));
+    }
 }
