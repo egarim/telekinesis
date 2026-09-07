@@ -332,15 +332,17 @@ if (args.Contains("setup"))
     // .CreateApplicationBuilder(args) below legitimately consumes — so unrelated
     // arguments keep passing through exactly as before, and only the dangerous
     // ambiguity is refused.
+    // Keep only the letters: every prefix and separator a typo can use (- _ . /
+    // and the em-dash a README paste leaves behind) falls out at once.
     static string Canonical(string s) =>
-        s.TrimStart('-', '/').Split('=')[0].Replace("-", "").Replace("_", "").ToLowerInvariant();
+        new string(s.Split('=')[0].Where(char.IsAsciiLetter).ToArray()).ToLowerInvariant();
 
     var nearMiss = args.FirstOrDefault(a => a != "--read-only" && Canonical(a) == "readonly");
     if (nearMiss is not null)
     {
-        // Catches --readonly, --read_only, -read-only, /read-only, --READ-ONLY and
-        // --read-only=false — every one of which used to be silently ignored, which
-        // meant starting with actions ENABLED.
+        // Catches --readonly, --read_only, --read.only, -read-only, /read-only,
+        // —read-only, --READ-ONLY and --read-only=false — every one of which used to
+        // be silently ignored, which meant starting with actions ENABLED.
         Console.Error.WriteLine($"Unrecognized option '{nearMiss}'. Did you mean --read-only?");
         Console.Error.WriteLine(
             "Refusing to start rather than silently running with actions enabled (issue #52).");
