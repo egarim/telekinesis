@@ -312,9 +312,17 @@ if (args.Contains("setup"))
           (Electron/Chromium apps additionally need --force-renderer-accessibility)
 
         macOS — grant Accessibility permission to the terminal or host process in
-          System Settings > Privacy & Security > Accessibility. (Backend TODO.)
+          System Settings > Privacy & Security > Accessibility. The grant follows the
+          binary's code signature, so granting the TERMINAL is the stable choice while
+          developing. See docs/RUNNING-ON-MACOS.md.
 
-        Windows — no setup usually required; run elevated to reach elevated apps. (Backend TODO.)
+        Windows — no setup usually required; run elevated to reach elevated apps.
+          Over SSH you land in session 0 and see no windows. The one-shot verbs (apps,
+          tree, find, click, set-text, ...) and `assert` relay into the console session
+          automatically; probe, repl, run and pilot do NOT — run those at the console.
+          See docs/HEADLESS-CLI.md.
+
+        Full command, flag and environment-variable reference: docs/CLI.md
         """);
     return 0;
 }

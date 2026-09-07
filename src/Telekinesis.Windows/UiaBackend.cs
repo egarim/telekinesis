@@ -57,8 +57,9 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
             // scaled secondary monitors drift from true pixels. We try to set it
             // here, but the call FAILS if the process already has a DPI context
             // (e.g. the `dotnet` host that runs the tool build declares one in its
-            // apphost manifest — you cannot change it once set). The self-contained
-            // single-file exe carries a PerMonitorV2 manifest so it starts correct.
+            // apphost manifest — you cannot change it once set). A self-contained
+            // FOLDER publish carries app.manifest's PerMonitorV2 so it starts correct;
+            // single-file is blocked on this head (issue #26), so don't suggest it.
             // Either way we record what actually stuck, so `doctor` can warn.
             EnsureDpiAwareness();
 
@@ -109,7 +110,7 @@ public sealed class UiaBackend : IAccessibilityBackend, IScreenCaptureBackend, I
                 ? "Per-monitor-v2 DPI awareness active; element bounds match physical pixels on all monitors."
                 : $"Process is {DpiAwarenessName(_dpiAwareness)} DPI-aware, not per-monitor. Fine on one monitor or uniform scaling; on a multi-monitor setup with mixed scale factors, element bounds on secondary monitors can drift from true pixels.",
             perMonitor ? null
-                : "Run the self-contained single-file build (it ships a per-monitor-v2 manifest), or launch so the process starts per-monitor-v2 aware — the `dotnet` host fixes a DPI context before the tool can change it."));
+                : "Run a self-contained FOLDER publish or a release archive — its apphost carries the per-monitor-v2 manifest. (Single-file publish is blocked on the Windows head, issue #26.) The `dotnet` host fixes a DPI context before the tool can change it, which is why the dotnet-tool route reports this."));
 
         return new DiagnosticReport(items.All(i => i.Ok), items);
     }, ct);

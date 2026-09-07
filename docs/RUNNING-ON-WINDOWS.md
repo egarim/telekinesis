@@ -51,10 +51,15 @@ elevated apps. `doctor` reports the current state as the `elevation` check.
   `type_text` (KEYEVENTF_UNICODE, layout-independent, verified by read-back), and
   `press_keys` (`ctrl+a` chord verified) — all `path=InputInjection`.
 - Focus: `get_focused` reads `AutomationElement.FocusedElement` directly;
-  `wait_for_event("focus-changed", …)` fires from
+  `wait_for(kind: "focus-changed")` fires from
   `AddAutomationFocusChangedEventHandler` — verified by clicking between two controls.
   Arm the waiter *before* the action; an action that doesn't move focus (clicking the
   already-focused control) produces no event.
+
+  The tool is **`wait_for`**, not `wait_for_event`. `kind` is `"focus-changed"` or
+  `"state-changed:<name>"`, and an empty `kind` matches any event; `timeoutMs`
+  defaults to 2000. On timeout it returns `null` rather than failing, so check the
+  result — a timeout is not an error.
 - Password fields: `IsPassword` → role `PasswordEdit` + `Protected` state, text never
   read (verified: `Text` stays null on a `UseSystemPasswordChar` box with content).
 
@@ -73,18 +78,36 @@ Consequences:
   vision tier: `screenshot` the region, confirm the target pixels, `click_at` what
   you see (see `docs/VISION.md`).
 - Z-order is invisible to the a11y tree: an element reports `Visible` with plausible
-  bounds while another window covers it. The pointer paths (`click`, and the injection
-  fallback under `invoke`) now **hit-test the click point** with `WindowFromPoint` and
-  refuse with "element is covered by another window" rather than clicking through to
-  whatever is on top. Native actions (`invoke`/`set_value`/`set_text`) don't depend on
-  being on top and are unaffected — prefer them.
+  bounds while another window covers it. Every pointer path now **hit-tests the click
+  point** first and refuses rather than clicking through to whatever is on top.
 
-**Self-check.** `telekinesis doctor` now reports a `dpi-awareness` line: `per-monitor`
+  The guard is **element-level**, not window-level: it asks
+  `AutomationElement.FromPoint` what is actually at the point and classifies it as
+  related (the element or its own ancestors/descendants — fine), unrelated (refuse),
+  or unknown; `WindowFromPoint` is only the fallback when `FromPoint` fails or the
+  relationship is unknown. That is why it also catches an in-window modal overlay in
+  a single-HWND WPF/WinUI/Uno app, which a window-level check cannot see.
+
+  It guards `click`, the injection fallback under `invoke`, **and `set_text`'s
+  focus-click fallback**. The messages differ by path, so match on the prefix, not
+  the whole string:
+
+  - pointer: `Element is covered by <what> at its click point; a pointer click would hit the wrong target…`
+  - `set_text` focus click: `Element is covered by <what> at its focus-click point; typing would go to the wrong control…`
+
+  Only the **native** patterns (`invoke`'s InvokePattern, `set_value`, `set_text`'s
+  ValuePattern) skip the guard, because they do not depend on being on top — prefer
+  them.
+
+**Self-check.** `telekinesis doctor` reports a `dpi-awareness` line: `per-monitor`
 means element bounds match physical pixels on every monitor; `system`/`unaware` means
-bounds on scaled secondary monitors may drift, and you should use the self-contained
-single-file build (it ships a per-monitor-v2 manifest) or escalate to the vision tier
-there. The programmatic switch usually succeeds under the `dotnet` host, but this tells
-you for certain on the machine in front of you.
+bounds on scaled secondary monitors may drift. The fix is a self-contained **folder**
+publish or a release archive — its apphost carries the per-monitor-v2 manifest.
+(Single-file publish is blocked on the Windows head — see
+[Single-file publish is not supported on Windows](#single-file-publish-is-not-supported-on-windows) — do not reach for it.)
+Otherwise escalate to the vision tier on those monitors. The programmatic switch
+usually succeeds under the `dotnet` host, but this tells you for certain on the
+machine in front of you.
 
 ## 7. Perception caps
 The control-view walk caps children at 256 per node and searches at 20 000 nodes, so
@@ -108,7 +131,7 @@ Validated live against Calculator, Windows 11 Notepad, and a WinForms test app:
 - Native `invoke` (Calculator button, effect verified on the display)
 - Native `set_text` with UIA read-back verification
 - Injected `click` / `type_text` / `press_keys` with effect verification
-- `get_focused` + `wait_for_event("focus-changed")`
+- `get_focused` + `wait_for(kind: "focus-changed")`
 - `PasswordEdit`/`Protected` masking; `StaleElementException` on dead handles
 
 

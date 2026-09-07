@@ -1,18 +1,24 @@
 # Telekinesis demo scenarios
 
-Scripted flows for the demo reel (see `../docs/DEMO-PLAN.md`). Each `.json` is executed
-by `telekinesis run <file>` (runner built by Codex, format in `../docs/CODEX-TASKS.md`).
-The runner prints each `say` line as a caption while it drives the desktop, so the
-recording narrates itself.
+Scripted flows executed by `telekinesis run <file> --enable-actions`. The runner
+prints each `say` line as a caption while it drives the desktop, so a recording
+narrates itself, and it exits nonzero on the first failure — which makes these
+end-to-end tests as much as demos.
 
-These target a **Linux desktop session** (the Lun.Os VM). Run `telekinesis doctor` first
-to confirm the a11y bus and `/dev/uinput` are ready.
+**File format:** [../docs/SCENARIOS.md](../docs/SCENARIOS.md).
 
-| File | Demo | Notes |
+| File | Demo | Validated on / needs |
 |---|---|---|
-| `fill-out-contact.json` | 1 — fill a real GUI app | needs a form app open (GNOME Contacts) |
-| `cross-app-copy.json` | 2 — read A, act in B | needs source + dest windows open |
-| `survives-redesign.json` | 4 — semantic UI test | pair with a restyle step between runs |
+| `calc-add.json` | computes 7+7 on Calculator by button name, native invoke only, verified by reading the display back | **validated** on Windows 11 (UIA); open Calculator first |
+| `blog-navigate.json` | navigates a real blog: find a post link → native invoke → verify by title → Back → verify home | **validated** on Windows 11 + Edge |
+| `thunar-navigate.json` | drives the Thunar file manager | **validated** on Linux (AT-SPI) |
+| `thunar-fill-location.json` | fills Thunar's location bar | Linux (AT-SPI) |
+| `cross-app-copy.json` | read from app A, act in app B | needs source + destination windows open |
+| `fill-out-contact.json` | fill a real GUI form | needs a form app open (GNOME Contacts) |
 
-Password-safety (demo 5) is shown via `read_element` on a login form plus the
-`fill_credential` handoff — see the DEMO-PLAN; its scenario lands once Codex wires the tool.
+On Linux, run `telekinesis doctor` first to confirm the accessibility bus and
+`/dev/uinput` access.
+
+Password safety is demonstrated by `read_element` on a login form (protected
+fields read back masked in every mode) plus the `fill_credential` handoff — see
+[../docs/REMOTE.md](../docs/REMOTE.md#credentials--the-handoff-rule).

@@ -6,7 +6,9 @@ namespace Telekinesis.Cli;
 /// File audit trail for every action tool call, in addition to the stderr line.
 /// One JSON object per line at $XDG_STATE_HOME/telekinesis/audit.log (fallback:
 /// ~/.local/state/telekinesis/audit.log; on Windows %LOCALAPPDATA%\Telekinesis\state).
-/// Secrets never appear here — fill_credential logs only field metadata.
+/// fill_credential logs only field metadata, never the secret. NOTE console_write
+/// logs its text verbatim (a shell command is the audit trail), so this file is
+/// only as clean as what callers type into a PTY — see docs/CONSOLE.md#security.
 /// </summary>
 internal static class AuditLog
 {
