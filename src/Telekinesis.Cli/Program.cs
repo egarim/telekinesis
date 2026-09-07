@@ -166,10 +166,12 @@ if (args.FirstOrDefault() == "serve")
     web.Services.AddSingleton<BackendProvider>();
     web.Services.AddSingleton<VisionMemoryService>();
     web.Services.AddSingleton<ConsoleSessionService>();
+    web.Services.AddSingleton<CdpSessionService>();
     var sse = web.Services.AddMcpServer().WithHttpTransport()
         .WithTools([typeof(PerceptionTools), typeof(AssertTools), .. ProviderRegistry.Default.TrustedToolTypes]);
     if (enableActions)
-        sse.WithTools([typeof(ActionTools), typeof(CredentialTools), typeof(ConsoleTools), .. ProviderRegistry.Default.ExternalToolTypes]);
+        sse.WithTools([typeof(ActionTools), typeof(CredentialTools), typeof(ConsoleTools),
+            .. Telekinesis.Cli.Providers.CdpProvider.ActionToolTypes, .. ProviderRegistry.Default.ExternalToolTypes]);
 
     var app = web.Build();
     Microsoft.AspNetCore.Builder.McpEndpointRouteBuilderExtensions.MapMcp(app);
@@ -208,6 +210,20 @@ if (args.Contains("doctor"))
         Console.WriteLine($"  [{(visionOk ? "ok" : "--")}] vision: OmniParser sidecar at {parser.BaseUrl} "
             + (visionOk ? "is reachable." : $"not reachable (optional; see docs/VISION.md)."));
     }
+
+    // CDP tier: optional and off by default — report it, never block readiness on it.
+    if (!CdpSessionService.Enabled)
+        Console.WriteLine($"  [--] cdp: off (set {CdpSessionService.EnabledEnvVar}=1 for the browser DevTools tier; see docs/BROWSERS.md).");
+    else if (await CdpSessionService.ProbeAsync() is { } browserVersion)
+    {
+        var pages = 0;
+        try { pages = (await CdpSessionService.ListTargetsAsync()).Count(t => t.Type == "page"); }
+        catch { /* endpoint answered /json/version but not /json/list — still report it */ }
+        Console.WriteLine($"  [ok] cdp: {browserVersion} at {CdpSessionService.Endpoint} — {pages} page target(s).");
+    }
+    else
+        Console.WriteLine($"  [--] cdp: enabled but nothing answers at {CdpSessionService.Endpoint} "
+            + $"(start the browser with --remote-debugging-port={CdpSessionService.Port}; optional, see docs/BROWSERS.md).");
     // Provider plugins: which are loaded, and whether any came from outside the
     // tree. External assemblies run with the server's full power — flag them.
     foreach (var entry in Telekinesis.Cli.ProviderRegistry.Default.Entries)
@@ -313,6 +329,7 @@ builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 builder.Services.AddSingleton<BackendProvider>();
 builder.Services.AddSingleton<VisionMemoryService>();
 builder.Services.AddSingleton<ConsoleSessionService>();
+builder.Services.AddSingleton<CdpSessionService>();
 
 var mcp = builder.Services
     .AddMcpServer()
@@ -320,7 +337,8 @@ var mcp = builder.Services
     .WithTools([typeof(PerceptionTools), typeof(AssertTools), .. ProviderRegistry.Default.TrustedToolTypes]);
 
 if (!readOnly)
-    mcp.WithTools([typeof(ActionTools), typeof(CredentialTools), typeof(ConsoleTools), .. ProviderRegistry.Default.ExternalToolTypes]);
+    mcp.WithTools([typeof(ActionTools), typeof(CredentialTools), typeof(ConsoleTools),
+        .. Telekinesis.Cli.Providers.CdpProvider.ActionToolTypes, .. ProviderRegistry.Default.ExternalToolTypes]);
 
 await builder.Build().RunAsync();
 return 0;

@@ -26,6 +26,13 @@ Remote posture defaults to perception:
 `--read-only` always wins. The `assert_element` tool is classified as perception
 (it only polls the tree) and is available in every mode.
 
+The optional CDP browser tier follows the same gate: its read tools
+(`browser_targets`, `browser_console`, `browser_network`) are perception, while
+`browser_evaluate` is an action — absent under `--read-only` and over
+`serve --sse` without `--enable-actions`. The tier's own rules (opt-in,
+loopback-only, no headers or bodies) live in
+[docs/BROWSERS.md](BROWSERS.md#the-cdp-tier--console-network-and-js).
+
 ## Audit log
 
 Every action tool call (including refusals-worthy failures) is appended as one

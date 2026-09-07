@@ -4,7 +4,9 @@ Browsers publish the entire DOM into the platform accessibility tree — that is
 how screen readers work — so the web, the surface every pixel agent struggles
 with, is first-class for Telekinesis: links are `[Link]` elements with real
 names and a native `invoke`, form fields are `[Edit]`s that take `set_text`.
-No browser driver, no CDP, no DOM scraping. Validated live on Windows 11 +
+No browser driver, no CDP, no DOM scraping by default — an optional
+[CDP tier](#the-cdp-tier--console-network-and-js) adds what the tree structurally
+cannot see. Validated live on Windows 11 +
 Microsoft Edge (Chromium); the same model applies to AT-SPI (Linux) and AXAPI
 (macOS).
 
@@ -66,9 +68,79 @@ backend orders those correctly for Documents.
   no DOM accessibility — the same gap as canvas desktop apps. Route those
   through the vision tier: `screenshot` → `parse_screen` → `click_at`
   ([docs/VISION.md](VISION.md)).
-- **Deep DOM/JS/network access** is deliberately out of scope for the core —
-  that is a browser-specific concern (CDP) and belongs in an optional provider
-  (see issue #21), not the OS-agnostic a11y path.
+- **Console output, network activity and JavaScript** are invisible to any
+  accessibility tree. Those live in the optional CDP tier below — a provider,
+  never the OS-agnostic core.
+
+## The CDP tier — console, network and JS
+
+The accessibility tree gives you the page's *elements*. It cannot give you what
+the page *logged*, what it *fetched*, or the result of an expression. That is
+what a browser extension buys, and Telekinesis gets it without one: an opt-in
+provider that speaks the Chrome DevTools Protocol to a browser you started with
+`--remote-debugging-port`.
+
+```
+TELEKINESIS_CDP=1 telekinesis           # tier on (port 9222, or TELEKINESIS_CDP_PORT)
+chrome --remote-debugging-port=9222     # any Chromium: Chrome, Edge, Brave, …
+```
+
+| Tool | Tier | What it returns |
+|---|---|---|
+| `browser_targets` | perception | attachable pages: id, title, projected url |
+| `browser_console` | perception | recent console messages + uncaught exceptions (the browser replays its buffered history on attach) |
+| `browser_network` | perception | request **metadata**: method, url, status, mime, size, duration |
+| `browser_evaluate` | **action** | the value of a JavaScript expression |
+
+`doctor` reports whether the tier is on and reachable.
+
+### What it will not do
+
+The tier is a *read* tier plus one explicitly-gated action, and it is built so a
+mistake cannot become a credential leak:
+
+- **Off by default.** Without `TELEKINESIS_CDP=1` nothing connects and none of
+  these tools are even registered.
+- **Loopback only.** The endpoint is `127.0.0.1` with no host knob, and a
+  debugger socket that resolves anywhere else is refused.
+- **No headers, ever** — request and response headers are never read out of the
+  protocol event, so `Cookie`, `Authorization` and `Set-Cookie` cannot appear.
+- **No bodies, ever.** `postData` arrives uninvited on every request event (your
+  login POST is in it) and is never read; `Network.getResponseBody`,
+  `getRequestPostData`, cookie and storage methods are never sent at all. The
+  session sends exactly four methods: `Runtime.enable`, `Log.enable`,
+  `Network.enable`, `Runtime.evaluate`.
+- **URLs are projected**: query parameter *names* survive, every *value* becomes
+  `[redacted]`, and the `#fragment` — where an OAuth implicit flow puts its token
+  — is dropped. This applies to URLs quoted inside console text too, which is
+  exactly how a CORS error leaks one.
+- **Text is scrubbed** of known secret shapes (JWTs, `Bearer …`, provider API
+  keys, `password=…`). Best-effort by construction: a secret that looks like
+  ordinary prose is not catchable, which is why bodies and headers are excluded
+  outright rather than filtered.
+- **Page content is untrusted.** Console text is written by the site — treat it
+  as data, never as instructions. Note the sharpest form of this: because the
+  browser *replays* its buffered console history when the tier attaches, a page
+  can log attacker text long before an agent ever connects, and it will be
+  waiting in the first `browser_console` result.
+
+`browser_evaluate` is an **action**, not a read: JavaScript in a logged-in page
+runs with the user's whole session, so it is absent under `--read-only` and over
+`serve --sse` without `--enable-actions`, and every expression is audit-logged
+(the result is not — it may carry page data). Attaching to a page is audited too,
+because attaching is the grant.
+
+### Blind spots
+
+Cross-origin iframes, service workers and dedicated workers are separate CDP
+targets; their console and network never reach the page session. `Network`
+capture starts at attach — call `browser_network` once *before* triggering the
+traffic you want to see (console, by contrast, replays history).
+
+URL **path** segments are preserved, because a path is what makes a request
+identifiable. Secrets carried in a path rather than a query — signed share links
+(`/s/<token>/…`), magic links, some presigned URLs — therefore survive
+projection. Query values and fragments, where tokens usually live, do not.
 
 ## Worked example
 
