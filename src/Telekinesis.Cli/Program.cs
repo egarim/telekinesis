@@ -9,6 +9,36 @@ using Telekinesis.Cli;
 // telekinesis setup      → print the platform setup steps (udev rule, TCC, ...) and exit
 // telekinesis probe ...  → exercise the backend from the terminal (VM validation)
 
+// --help / --version (issue #55). FIRST, because everything below either
+// dispatches a subcommand or falls through to the stdio MCP server — which is what
+// used to happen to `telekinesis --help`: it started the server and waited on
+// stdin, indistinguishable from a hang.
+//
+// The rule: a help word as the first argument always wins. Anywhere ELSE it only
+// wins when a one-shot verb does not own the line, because those forward their
+// operands verbatim — `launch app.exe --help` must reach the launched program, and
+// `apps --help` must still list applications.
+//
+// Known and accepted limitation: on the non-verb paths this cannot tell a flag from
+// a flag's VALUE, so `probe --type "--help"` prints help instead of typing that
+// literal string. No realistic value is the bare word `--help`, and the cost the
+// other way was `serve --help` silently starting a server. Documented in
+// docs/CLI.md rather than papered over.
+string[] helpWords = ["--help", "-h", "-?", "/?", "help"];
+var oneShotOwnsArgs = OneShot.CanHandle(args.FirstOrDefault());
+if (helpWords.Contains(args.FirstOrDefault())
+    || (!oneShotOwnsArgs && args.Any(helpWords.Contains)))
+{
+    Console.WriteLine(Usage.Text);
+    return 0;
+}
+
+if (args.FirstOrDefault() is "--version" or "-v")
+{
+    Console.WriteLine(Usage.Version);
+    return 0;
+}
+
 #if !WINDOWS
 // The dotnet-tool package can only target plain net10.0 (PackAsTool rejects the
 // -windows TFM), but the UIA backend needs the desktop framework. The tool build

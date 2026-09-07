@@ -5,10 +5,25 @@ their own guide in [HEADLESS-CLI.md](HEADLESS-CLI.md) — this page is the
 complete surface, including the developer-facing commands that only ever
 appeared as scattered examples before.
 
-> There is currently **no `--help` and no `--version`**. `telekinesis --help`
-> falls through to the stdio MCP server and waits on stdin, which looks like a
-> hang. Use this page instead
-> ([#55](https://github.com/egarim/telekinesis/issues/55) tracks adding them).
+`telekinesis --help` prints a summary of this page and exits 0; `--version`
+prints the version. `--help` is also honoured **after a subcommand** —
+`serve --help`, `probe --help`, `repl --help`, `doctor --help` all print it rather
+than starting a server or a session.
+
+The one exception is a **one-shot verb**, which owns its own arguments:
+`telekinesis launch app.exe --help` forwards `--help` to the launched program, and
+`telekinesis apps --help` still runs the verb. Those lines carry operands that must
+never be hijacked.
+
+On every other line, a help word anywhere wins — and that has a known limit worth
+stating rather than glossing: it cannot tell a flag from a flag's **value**. So
+`telekinesis probe --type "--help"` prints help instead of typing that literal
+string. No realistic value is the bare word `--help`, and the cost the other way
+was `serve --help` silently starting a server; if you ever do need to pass one of
+these words as a value, use a one-shot verb with `--`.
+
+Accepted spellings, in both positions: `--help`, `-h`, `-?`, `/?`, `help`.
+For version: `--version`, `-v` (first argument only).
 
 ## How arguments are dispatched
 
@@ -61,6 +76,16 @@ including the .NET host's own `--environment` and `--Logging:*` — pass through
 untouched.
 
 ---
+
+## `telekinesis --help` / `--version`
+
+```
+telekinesis --help          # summary of this page, exit 0
+telekinesis --version       # e.g. "telekinesis 0.9.0"
+```
+
+The help text lists the subcommands and one-shot verbs and points back here; it
+is deliberately not a second copy of this reference, because two copies drift.
 
 ## `telekinesis` — stdio MCP server
 
