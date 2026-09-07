@@ -1,3 +1,4 @@
+using System.IO;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -91,12 +92,31 @@ public sealed class ConPtyConsoleSession : IConsoleSession
         });
     }
 
-    public void Write(string text)
+    public bool Write(string text, TimeSpan timeout)
     {
         var bytes = Encoding.UTF8.GetBytes(text);
-        _input.Write(bytes, 0, bytes.Length);
-        _input.Flush();
+
+        // WriteAsync + a CancellationToken does NOT bound this. _input is a
+        // non-overlapped FileStream over a CreatePipe handle, so WriteAsync is the
+        // synchronous Write queued to the thread pool: the token only decides whether
+        // it STARTS, never interrupts it mid-flight. Verified — the thread sits in
+        // write() long after the token expires. Flush() is a second unbounded block,
+        // since FlushFileBuffers on a pipe waits for the reader to drain.
+        //
+        // So bound the CALLER instead, which is what issue #61 is actually about: the
+        // MCP request must not hang. The write continues on a pool thread and is
+        // abandoned. That leaks one thread per stuck write, which is acceptable only
+        // because this path is opt-in and already unusable (#46/#49) — a real fix
+        // needs an overlapped pipe (CreateNamedPipe) or a dedicated writer thread.
+        var write = Task.Run(() =>
+        {
+            _input.Write(bytes, 0, bytes.Length);
+            _input.Flush();
+        });
+        return write.Wait(timeout);
     }
+
+
 
     public void Resize(int cols, int rows) =>
         ResizePseudoConsole(_pty, new COORD { X = (short)cols, Y = (short)rows });
