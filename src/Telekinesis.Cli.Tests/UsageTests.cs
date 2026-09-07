@@ -66,10 +66,11 @@ public class UsageTests
         => Assert.Contains(subcommand, SubcommandSection);
 
     [Fact]
-    public void Help_states_the_safety_gate_both_ways()
+    public void Help_mentions_both_gate_flags()
     {
-        // The most consequential thing a reader can get wrong: stdio is full-power
-        // by default, everything else is opt-in.
+        // Pins the VOCABULARY, not the semantics — this would still pass if the
+        // sentence stated the gate backwards. A stronger check would have to parse
+        // English, so this is a guard against the flags vanishing, nothing more.
         Assert.Contains("--read-only", Usage.Text);
         Assert.Contains("--enable-actions", Usage.Text);
         Assert.Contains("ENABLED", Usage.Text);

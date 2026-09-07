@@ -9,22 +9,25 @@ using Telekinesis.Cli;
 // telekinesis setup      → print the platform setup steps (udev rule, TCC, ...) and exit
 // telekinesis probe ...  → exercise the backend from the terminal (VM validation)
 
-// --help / --version, matched on the FIRST argument only (issue #55). First,
-// because everything below either dispatches a subcommand or falls through to the
-// stdio MCP server — which is what used to happen to `telekinesis --help`: it
-// started the server and waited on stdin, indistinguishable from a hang.
+// --help / --version (issue #55). FIRST, because everything below either
+// dispatches a subcommand or falls through to the stdio MCP server — which is what
+// used to happen to `telekinesis --help`: it started the server and waited on
+// stdin, indistinguishable from a hang.
 //
-// First-argument-only is deliberate. `telekinesis launch app.exe --help` must
-// forward --help to the launched program, and a one-shot verb's own operands must
-// never be hijacked; the same reasoning as the OneShot dispatch below.
-// A one-shot verb owns its own arguments — `launch app.exe --help` must forward
-// --help to the launched program, and no verb's operands may be hijacked. Every
-// OTHER path takes flags only, so --help anywhere on those lines is unambiguous:
-// `serve --help`, `probe --help` and `repl --help` used to start a server or a
-// session rather than explain themselves, which is the same defect as #55.
+// The rule: a help word as the first argument always wins. Anywhere ELSE it only
+// wins when a one-shot verb does not own the line, because those forward their
+// operands verbatim — `launch app.exe --help` must reach the launched program, and
+// `apps --help` must still list applications.
+//
+// Known and accepted limitation: on the non-verb paths this cannot tell a flag from
+// a flag's VALUE, so `probe --type "--help"` prints help instead of typing that
+// literal string. No realistic value is the bare word `--help`, and the cost the
+// other way was `serve --help` silently starting a server. Documented in
+// docs/CLI.md rather than papered over.
+string[] helpWords = ["--help", "-h", "-?", "/?", "help"];
 var oneShotOwnsArgs = OneShot.CanHandle(args.FirstOrDefault());
-if (args.FirstOrDefault() is "--help" or "-h" or "-?" or "/?" or "help"
-    || (!oneShotOwnsArgs && args.Any(a => a is "--help" or "-h")))
+if (helpWords.Contains(args.FirstOrDefault())
+    || (!oneShotOwnsArgs && args.Any(helpWords.Contains)))
 {
     Console.WriteLine(Usage.Text);
     return 0;

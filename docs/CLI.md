@@ -13,10 +13,17 @@ than starting a server or a session.
 The one exception is a **one-shot verb**, which owns its own arguments:
 `telekinesis launch app.exe --help` forwards `--help` to the launched program, and
 `telekinesis apps --help` still runs the verb. Those lines carry operands that must
-never be hijacked; every other line takes flags only, so `--help` on them is
-unambiguous.
+never be hijacked.
 
-Accepted spellings: `--help`, `-h`, `-?`, `/?`, `help`, and `--version`, `-v`.
+On every other line, a help word anywhere wins — and that has a known limit worth
+stating rather than glossing: it cannot tell a flag from a flag's **value**. So
+`telekinesis probe --type "--help"` prints help instead of typing that literal
+string. No realistic value is the bare word `--help`, and the cost the other way
+was `serve --help` silently starting a server; if you ever do need to pass one of
+these words as a value, use a one-shot verb with `--`.
+
+Accepted spellings, in both positions: `--help`, `-h`, `-?`, `/?`, `help`.
+For version: `--version`, `-v` (first argument only).
 
 ## How arguments are dispatched
 
