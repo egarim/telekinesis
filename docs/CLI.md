@@ -6,10 +6,17 @@ complete surface, including the developer-facing commands that only ever
 appeared as scattered examples before.
 
 `telekinesis --help` prints a summary of this page and exits 0; `--version`
-prints the version. Both are matched on the **first argument only**, so
-`telekinesis launch app.exe --help` still forwards `--help` to the launched
-program and a one-shot verb's own operands are never hijacked. Accepted spellings:
-`--help`, `-h`, `-?`, `/?`, `help`, and `--version`, `-v`.
+prints the version. `--help` is also honoured **after a subcommand** —
+`serve --help`, `probe --help`, `repl --help`, `doctor --help` all print it rather
+than starting a server or a session.
+
+The one exception is a **one-shot verb**, which owns its own arguments:
+`telekinesis launch app.exe --help` forwards `--help` to the launched program, and
+`telekinesis apps --help` still runs the verb. Those lines carry operands that must
+never be hijacked; every other line takes flags only, so `--help` on them is
+unambiguous.
+
+Accepted spellings: `--help`, `-h`, `-?`, `/?`, `help`, and `--version`, `-v`.
 
 ## How arguments are dispatched
 

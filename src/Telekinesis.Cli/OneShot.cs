@@ -22,6 +22,10 @@ internal static class OneShot
     private static readonly string[] Perception = ["apps", "tree", "find", "read", "focused", "snapshot"];
     private static readonly string[] Actions = ["click", "click-at", "invoke", "set-text", "type", "press", "launch"];
 
+    /// <summary>Every one-shot verb, so the help text can be checked against the
+    /// real list instead of a hand-maintained copy of it.</summary>
+    internal static IEnumerable<string> AllVerbs => [.. Perception, .. Actions];
+
     public static bool CanHandle(string? verb) =>
         verb is not null && (Perception.Contains(verb) || Actions.Contains(verb));
 

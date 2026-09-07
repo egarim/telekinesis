@@ -17,7 +17,14 @@ using Telekinesis.Cli;
 // First-argument-only is deliberate. `telekinesis launch app.exe --help` must
 // forward --help to the launched program, and a one-shot verb's own operands must
 // never be hijacked; the same reasoning as the OneShot dispatch below.
-if (args.FirstOrDefault() is "--help" or "-h" or "-?" or "/?" or "help")
+// A one-shot verb owns its own arguments — `launch app.exe --help` must forward
+// --help to the launched program, and no verb's operands may be hijacked. Every
+// OTHER path takes flags only, so --help anywhere on those lines is unambiguous:
+// `serve --help`, `probe --help` and `repl --help` used to start a server or a
+// session rather than explain themselves, which is the same defect as #55.
+var oneShotOwnsArgs = OneShot.CanHandle(args.FirstOrDefault());
+if (args.FirstOrDefault() is "--help" or "-h" or "-?" or "/?" or "help"
+    || (!oneShotOwnsArgs && args.Any(a => a is "--help" or "-h")))
 {
     Console.WriteLine(Usage.Text);
     return 0;

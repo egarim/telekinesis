@@ -29,13 +29,14 @@ internal static class Usage
         telekinesis — drive the desktop through the accessibility tree.
 
         USAGE
+          telekinesis --help | --version
           telekinesis [--read-only]              MCP server on stdio (the default)
           telekinesis <verb> [args]              one-shot: JSON to stdout, then exit
           telekinesis <subcommand> [flags]
 
         The default, with no arguments, is the stdio MCP server. It has actions
-        ENABLED; --read-only takes them away. Every other path that can change the
-        machine requires --enable-actions on that invocation.
+        ENABLED; --read-only takes them away. Every other path that can drive the
+        UI requires --enable-actions on that invocation.
 
         ONE-SHOT VERBS                           (docs/HEADLESS-CLI.md)
           apps tree find read focused snapshot   perception, always available
