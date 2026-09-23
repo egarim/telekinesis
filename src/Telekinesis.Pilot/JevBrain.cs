@@ -129,16 +129,17 @@ public sealed class JevBrain : ILocalBrain
             ? ActionCriteria
             : ActionCriteria.Where(kv => kv.Key != "click").ToDictionary(kv => kv.Key, kv => kv.Value);
 
+        // MEASURED: each question is its own prefill + batched pass, so latency is
+        // linear in question count (~430 ms each on an M1 Max via open-jev; 1259 ms
+        // for three, 771 ms for two). The key is only ever used by `press`, so it is
+        // asked in a second call, on the rare step that chose `press`, instead of
+        // being paid for on every step.
         var questions = new JsonObject
         {
             ["action"] = Choice(
                 "Choose the single next action that makes progress toward the goal, given the "
                 + "current screen, the readouts, and what the previous action did.",
                 actions),
-            ["key"] = Choice(
-                "If — and only if — the action is 'press', which key combination should be sent? "
-                + "Ignored for every other action.",
-                KeyCriteria),
         };
 
         // A choice needs something to choose between: with no candidates there is
@@ -155,15 +156,35 @@ public sealed class JevBrain : ILocalBrain
         }
 
         var sw = Stopwatch.StartNew();
+        var answers = await AskAsync(user, questions, ct);
+
+        // Second call only when the chosen action needs a key.
+        if (Chosen(answers, "action") is "press")
+        {
+            var keyAnswers = await AskAsync(user, new JsonObject
+            {
+                ["key"] = Choice("The next action is to press a key. Which key combination should be sent?", KeyCriteria),
+            }, ct);
+            if (keyAnswers["key"] is JsonNode key) answers["key"] = key.DeepClone();
+        }
+
+        return (Translate(answers, offered), (int)sw.ElapsedMilliseconds);
+    }
+
+    private async Task<JsonObject> AskAsync(string state, JsonObject questions, CancellationToken ct)
+    {
         using var response = await SendAsync(new JsonObject
         {
             ["model"] = _model,
-            ["state"] = user,
+            ["state"] = state,
             ["questions"] = questions,
         }, ct);
-        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!;
-        return (Translate(body, offered), (int)sw.ElapsedMilliseconds);
+        return JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!["answers"]?.AsObject()
+            ?? throw new InvalidOperationException("Jev returned no answers.");
     }
+
+    private static string? Chosen(JsonObject answers, string question) =>
+        answers[question]?["choice"]?.GetValue<string>();
 
     private static JsonObject Choice(string instructions, IReadOnlyDictionary<string, string> criteria)
     {
@@ -218,16 +239,11 @@ public sealed class JevBrain : ILocalBrain
     /// The confidence rides along: PilotAction ignores unknown fields, and the
     /// trace records the raw string — so calibration lands in the dataset for free.
     /// </summary>
-    private static string Translate(JsonNode body, IReadOnlyList<BrainOption> offered)
+    private static string Translate(JsonObject answers, IReadOnlyList<BrainOption> offered)
     {
-        var answers = body["answers"]?.AsObject()
-            ?? throw new InvalidOperationException("Jev returned no answers.");
-
-        string? Chosen(string question) => answers[question]?["choice"]?.GetValue<string>();
-
-        var action = Chosen("action")
+        var action = Chosen(answers, "action")
             ?? throw new InvalidOperationException("Jev returned no 'action' answer.");
-        var target = Chosen("target");
+        var target = Chosen(answers, "target");
         var result = new JsonObject { ["action"] = action };
 
         // Only the verbs that take one carry a target; `none` never leaves this class.
@@ -247,7 +263,7 @@ public sealed class JevBrain : ILocalBrain
             result["target"] = target;
         }
         if (action is "press")
-            result["text"] = Chosen("key")
+            result["text"] = Chosen(answers, "key")
                 ?? throw new InvalidOperationException(
                     "Jev chose 'press' but returned no 'key' answer; the reply is malformed.");
         if (answers["action"]?["confidence"] is JsonNode confidence)

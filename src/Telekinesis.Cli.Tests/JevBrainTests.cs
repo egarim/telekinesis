@@ -325,3 +325,53 @@ public class JevBrainLocalServerTests
         Assert.True(await brain.ProbeAsync());
     }
 }
+
+/// <summary>
+/// Latency is linear in question count — each question is its own prefill and
+/// batched pass (~430 ms on an M1 Max via open-jev). The `key` question is only
+/// ever used by `press`, so paying for it on every step was 40 % of the cost of
+/// a step for nothing. These pin the deferral.
+/// </summary>
+public class JevBrainQuestionCountTests
+{
+    private sealed class Counter(Func<int, string> reply) : HttpMessageHandler
+    {
+        public readonly List<JsonObject> Requests = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+        {
+            Requests.Add(JsonNode.Parse(await r.Content!.ReadAsStringAsync(ct))!.AsObject());
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(reply(Requests.Count), Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
+    private static readonly IReadOnlyList<BrainOption> One = [new("c1", "Button \"Seven\"")];
+
+    [Fact]
+    public async Task A_normal_step_asks_once_and_never_asks_for_a_key()
+    {
+        var counter = new Counter(_ => """{"answers":{"action":{"choice":"click"},"target":{"choice":"c1"}}}""");
+        using var brain = new JevBrain(url: JevBrain.LocalUrl, apiKey: "", http: new HttpClient(counter));
+        await brain.DecideAsync("sys", "state", One);
+
+        var request = Assert.Single(counter.Requests);
+        var asked = request["questions"]!.AsObject().Select(kv => kv.Key).ToList();
+        Assert.Equal(["action", "target"], asked);
+    }
+
+    [Fact]
+    public async Task Only_a_press_pays_for_the_second_call()
+    {
+        var counter = new Counter(n => n == 1
+            ? """{"answers":{"action":{"choice":"press"},"target":{"choice":"none"}}}"""
+            : """{"answers":{"key":{"choice":"enter"}}}""");
+        using var brain = new JevBrain(url: JevBrain.LocalUrl, apiKey: "", http: new HttpClient(counter));
+        var (json, _) = await brain.DecideAsync("sys", "state", One);
+
+        Assert.Equal(2, counter.Requests.Count);
+        Assert.Equal(["key"], counter.Requests[1]["questions"]!.AsObject().Select(kv => kv.Key));
+        Assert.Equal("enter", PilotAction.Parse(json, out _)!.Text);
+    }
+}

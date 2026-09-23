@@ -60,6 +60,26 @@ public class JevLiveTests
         Assert.True(ms > 0);
     }
 
+    /// <summary>Prints the measured per-step latency of the real brain against a
+    /// real server — the number docs/PILOT.md quotes, taken rather than assumed.</summary>
+    [Fact]
+    public async Task A_real_step_is_timed_so_the_documented_number_stays_honest()
+    {
+        if (string.IsNullOrWhiteSpace(Url)) return;
+        using var brain = new JevBrain(Url);
+        var samples = new List<int>();
+        for (var i = 0; i <= 5; i++)
+        {
+            // Vary the state: repeating one prompt measures a cache, not a step.
+            var (_, ms) = await brain.DecideAsync("ignored", State.Replace("= 7", $"= {7 + i}"), Calculator);
+            if (i > 0) samples.Add(ms);
+        }
+        samples.Sort();
+        Console.WriteLine($"JevBrain per-step latency: median {samples[samples.Count / 2]} ms "
+            + $"(min {samples[0]}, max {samples[^1]}) over {samples.Count} steps at {Url}");
+        Assert.All(samples, ms => Assert.True(ms > 0));
+    }
+
     [Fact]
     public async Task A_real_server_grounds_the_target_in_the_candidate_list()
     {

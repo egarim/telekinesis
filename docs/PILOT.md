@@ -181,13 +181,45 @@ API, which is a real departure from this tier's local-by-default posture: the
 `state` payload is a screen dump, and screen dumps contain whatever the app
 happened to be showing.
 
-### What is worth measuring, and what is not
+### Measured: option scoring is SLOWER than decoding here
 
 The 4B's problem was never schema validity — structured outputs already gave
 100 % valid JSON and zero rejections, so "0 % structured-output errors" buys
-nothing here. The claims worth testing are **latency** (70–500 ms against
-0.8–1.7 s warm and 16–24 s cold) and whether grounding survives the loss of
-free-form reasoning.
+nothing. The claim worth testing was **latency**, and it does not survive
+contact with a local implementation.
+
+Same machine (M1 Max, 64 GB), same 4B model class, one real pilot step
+(a 306-token Calculator state, four candidates), **state varied per call so the
+prompt cache cannot flatter the decoder**, median of 10 after a warm-up:
+
+| | median | vs decode |
+|---|---|---|
+| Ollama `qwen3:4b-instruct` — **decode JSON** | **321 ms** | — |
+| open-jev `Qwen3-4B-Instruct-2507-4bit` — score 1 question | 397 ms | 1.2× |
+| …score 2 questions | 771 ms | 2.4× |
+| …score 3 questions | 1259 ms | 3.9× |
+
+Both picked the same action (`click c2`, the Plus button after Seven), so
+grounding held. Latency did not.
+
+**Why, and it is structural rather than an implementation detail.** Scoring is
+one prefill plus one batched pass *per question* — about **431 ms each here**,
+and the cost is linear in question count. A decoder answers every field of the
+schema in a single pass of ~15 tokens. So the mechanism that makes System-1
+scoring attractive for *one* bounded judgement works against it for a structured
+action with several fields: the decoder amortizes the fields, the scorer pays for
+each one.
+
+That is what drove the shape of this brain. `key` is only ever used by `press`,
+so asking it up front cost 40 % of every step for nothing; it is now asked in a
+second call on the rare step that chose `press`. Measured end-to-end through
+`JevBrain` itself against a live server: **1259 ms → 768 ms** per step.
+
+Two caveats on the numbers. They are open-jev's local scoring, **not** the hosted
+Jev, whose published 70–500 ms is not contradicted by any of this — a purpose-built
+service and a research implementation on a laptop are different things. And a
+one-question judgement (a `noul` guard, a "has the screen settled" check) is
+397 ms here, which is the shape this mechanism is actually good at.
 
 ## Benchmark protocol — Whack-a-Mole
 
@@ -205,20 +237,23 @@ The protocol is the lifetime slider: start at 3000 ms and walk it down until the
 brain starts missing. The lowest lifetime a brain can still clear is its
 reaction budget, refereed by the app.
 
-| Brain | Expected decision | Fits a 3000 ms target? |
+| Brain | Decision latency | Fits a 3000 ms target? |
 |---|---|---|
 | dumb retry loop (no model) | — | 110 ms average, 0 misses |
-| `qwen3:4b-instruct`, CPU | 800–1700 ms warm, 16–24 s cold | warm yes, cold never |
-| `jev-latest` | 70–500 ms claimed | to be measured |
+| `qwen3:4b-instruct`, Surface CPU | 800–1700 ms warm, 16–24 s cold | warm yes, cold never |
+| `qwen3:4b-instruct`, M1 Max | 321 ms measured | yes |
+| open-jev `Qwen3-4B`, M1 Max | 768 ms measured | yes |
 
 This isolates exactly what is in dispute. Whack-a-Mole is one repeated bounded
 decision — "is the target up, and which candidate is it" — so the 4B's actual
 weakness, multi-step planning, is not exercised at all. What remains is
 grounding and latency, which is the comparison worth having.
 
-**Not yet run.** The sample is Avalonia and the published figures are Windows
-(UIA) on the Surface; these rows get filled in from a real round, not from
-vendor numbers.
+**The round itself has not been run.** The decision latencies above are measured;
+the hit/miss columns are not. The sample is Avalonia and the published figures
+are Windows (UIA) on the Surface, so the round belongs there. Note before
+running it that both brains clear a 3000 ms lifetime comfortably — the slider
+has to come down to roughly 1000 ms before the two separate.
 
 ## Notes
 
