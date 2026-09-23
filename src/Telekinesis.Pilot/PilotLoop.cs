@@ -37,8 +37,11 @@ public static class PilotLoop
             var (candidates, screen, readouts) = await UiCandidates.BuildAsync(backend, applicationId, goal, ct: ct);
             var ids = candidates.Select(c => c.Id).ToHashSet();
             var user = BuildUserMessage(goal, screen, candidates, readouts, lastFeedback);
+            var options = candidates
+                .Select(c => new BrainOption(c.Id, Describe(c)))
+                .ToList();
 
-            var (raw, brainMs) = await brain.DecideAsync(SystemPrompt, user, ct);
+            var (raw, brainMs) = await brain.DecideAsync(SystemPrompt, user, options, ct);
             var action = PilotAction.Parse(raw, out var parseError);
             var invalid = parseError ?? action?.Validate(ids);
 
@@ -49,7 +52,7 @@ public static class PilotLoop
                 trace.Write(i, screen, candidates, raw, action, invalid, executed: false, success: false, null, null, brainMs, 0);
                 say($"  ⚠ rejected: {invalid} — retrying");
                 var retryUser = user + $"\nYour previous reply was rejected: {invalid}. Reply with one valid JSON action.";
-                (raw, brainMs) = await brain.DecideAsync(SystemPrompt, retryUser, ct);
+                (raw, brainMs) = await brain.DecideAsync(SystemPrompt, retryUser, options, ct);
                 action = PilotAction.Parse(raw, out parseError);
                 invalid = parseError ?? action?.Validate(ids);
                 if (invalid is not null)
@@ -185,6 +188,11 @@ public static class PilotLoop
     private static string Clean(string s) => s
         .Replace("\\", "\\\\").Replace("\"", "\\\"")
         .Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
+
+    /// <summary>The option description a System-1 brain chooses between — the same
+    /// facts as the candidate's line in the prompt, as a phrase rather than a record.</summary>
+    internal static string Describe(Candidate c) =>
+        $"{c.Role} \"{Clean(c.Label)}\"" + (string.IsNullOrEmpty(c.Value) ? "" : $" showing {Clean(c.Value)}");
 
     private static string Describe(PilotAction a, IReadOnlyList<Candidate> candidates)
     {
