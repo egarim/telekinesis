@@ -5,11 +5,22 @@ using System.Text.Json.Nodes;
 
 namespace Telekinesis.Pilot;
 
+/// <summary>One selectable target handed to the brain: the short candidate id and
+/// a human description of it. Separate from <see cref="Candidate"/> because a brain
+/// must not see backend element refs — and because the replay harness rebuilds these
+/// from a recorded trace, where no refs exist.</summary>
+public sealed record BrainOption(string Id, string Description);
+
 /// <summary>A step-policy model: JSON state in, one JSON action out.</summary>
 public interface ILocalBrain : IDisposable
 {
     string Name { get; }
-    Task<(string Json, int LatencyMs)> DecideAsync(string system, string user, CancellationToken ct = default);
+
+    /// <param name="targets">The candidate ids the brain may target, with descriptions.
+    /// A generative brain reads them out of <paramref name="user"/> and ignores this;
+    /// a System-1 brain needs them as an explicit option set (issue #65).</param>
+    Task<(string Json, int LatencyMs)> DecideAsync(
+        string system, string user, IReadOnlyList<BrainOption> targets, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -54,7 +65,10 @@ public sealed class OllamaBrain : ILocalBrain
         }
     }
 
-    public async Task<(string Json, int LatencyMs)> DecideAsync(string system, string user, CancellationToken ct = default)
+    /// <summary>The candidate ids are already rendered into <paramref name="user"/>
+    /// for a model that reads prose, so <paramref name="targets"/> is unused here.</summary>
+    public async Task<(string Json, int LatencyMs)> DecideAsync(
+        string system, string user, IReadOnlyList<BrainOption> targets, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
         using var response = await _http.PostAsJsonAsync($"{_base}/api/chat", new

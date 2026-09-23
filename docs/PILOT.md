@@ -95,6 +95,92 @@ adds data), an 8B teacher for comparison via `--model`, and distillation into a
 sub-1B action router once behavior stabilizes. A GPU/LAN endpoint via
 `TELEKINESIS_BRAIN_URL` removes the latency wall independently.
 
+## System 1 — the Jev brain
+
+`--brain jev` swaps the step policy for [TypeSafe's Jev](https://docs.typesafe.ai),
+a "System 1" model: instead of *writing* JSON one token at a time, it answers
+`choice` questions over option sets we define and returns the selection with a
+probability distribution and a confidence. The action schema stops being
+something we parse and becomes something the request enforces.
+
+```
+export TELEKINESIS_JEV_KEY=...            # required; no key, no start
+telekinesis pilot "compute 7 plus 7" --app pid:N --brain jev --enable-actions
+telekinesis pilot-eval <trace.jsonl> --brain jev
+```
+
+| | `TELEKINESIS_JEV_URL` | default `https://api.typesafe.ai/v1/systemone` |
+|---|---|---|
+| | `TELEKINESIS_JEV_MODEL` | default `jev-latest` |
+
+The mapping is direct: `PilotAction` is one verb plus one candidate id, so the
+request carries a `choice` over the verbs and a `choice` over the ids
+`UiCandidates` already ranked — each id described by its role and label, which
+is the same information the prose prompt carries. A `none` sentinel covers the
+verbs that act on no element, and never escapes as a target.
+
+### What it cannot do
+
+**`type` is not offered at all.** It needs a generated string, and a System-1
+model selects rather than writes. Offering a verb it can never complete would
+only produce actions that `Validate` rejects, so the option set is
+`click | press | scroll | wait | done`. `press` survives because a key
+combination is enumerable.
+
+Two consequences, stated plainly:
+
+- Any task that needs text entry cannot be driven end-to-end by this brain today.
+  The two-tier design — Jev decides every step, the LLM is woken *only* to fill
+  `text` — is the obvious follow-up and is not implemented.
+- **Replay agreement on a trace containing `type` steps is a floor, not a
+  ceiling**: those steps can never agree. Compare on traces without them, or read
+  the number knowing which way it is biased.
+
+There is also no instruction channel — the system prompt is ignored, and the task
+lives in each question's `instructions`. And unlike Ollama this is a **hosted**
+API, which is a real departure from this tier's local-by-default posture: the
+`state` payload is a screen dump, and screen dumps contain whatever the app
+happened to be showing.
+
+### What is worth measuring, and what is not
+
+The 4B's problem was never schema validity — structured outputs already gave
+100 % valid JSON and zero rejections, so "0 % structured-output errors" buys
+nothing here. The claims worth testing are **latency** (70–500 ms against
+0.8–1.7 s warm and 16–24 s cold) and whether grounding survives the loss of
+free-form reasoning.
+
+## Benchmark protocol — Whack-a-Mole
+
+[`samples/WhackAMole`](../samples/WhackAMole/README.md) is the honest test for a
+step policy, because the app is the referee: it timestamps spawn → click itself
+and prints the latency, so the number is measured by the thing being clicked.
+
+The published baseline — **46/46 hits, 110 ms average** — is a dumb 10 Hz retry
+loop with *no model in the path at all*. That is the floor, not the target.
+Inserting any brain can only make it slower, so the question the benchmark
+answers is **how much a decision costs**, and whether the decision still lands
+inside the target's lifetime.
+
+The protocol is the lifetime slider: start at 3000 ms and walk it down until the
+brain starts missing. The lowest lifetime a brain can still clear is its
+reaction budget, refereed by the app.
+
+| Brain | Expected decision | Fits a 3000 ms target? |
+|---|---|---|
+| dumb retry loop (no model) | — | 110 ms average, 0 misses |
+| `qwen3:4b-instruct`, CPU | 800–1700 ms warm, 16–24 s cold | warm yes, cold never |
+| `jev-latest` | 70–500 ms claimed | to be measured |
+
+This isolates exactly what is in dispute. Whack-a-Mole is one repeated bounded
+decision — "is the target up, and which candidate is it" — so the 4B's actual
+weakness, multi-step planning, is not exercised at all. What remains is
+grounding and latency, which is the comparison worth having.
+
+**Not yet run.** The sample is Avalonia and the published figures are Windows
+(UIA) on the Surface; these rows get filled in from a real round, not from
+vendor numbers.
+
 ## Notes
 
 - The pilot obeys the same safety posture as everything else: `--enable-actions`

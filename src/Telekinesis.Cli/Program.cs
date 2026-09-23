@@ -92,7 +92,7 @@ if (args.FirstOrDefault() == "pilot")
     var dryRun = args.Contains("--dry-run");
     if (goal is null || app is null)
     {
-        Console.Error.WriteLine("Usage: telekinesis pilot \"<goal>\" --app pid:N [--max-steps N] [--model name] [--dry-run] --enable-actions");
+        Console.Error.WriteLine("Usage: telekinesis pilot \"<goal>\" --app pid:N [--max-steps N] [--brain ollama|jev] [--model name] [--dry-run] --enable-actions");
         return 2;
     }
     if (!dryRun && !args.Contains("--enable-actions"))
@@ -100,18 +100,18 @@ if (args.FirstOrDefault() == "pilot")
         Console.Error.WriteLine("Refusing to act without --enable-actions (use --dry-run to plan without executing).");
         return 2;
     }
-    using var brain = new Telekinesis.Pilot.OllamaBrain(POpt("--brain-url"), POpt("--model"));
-    if (!await brain.ProbeAsync())
+    var (brain, brainReady, brainHint) = await BrainFactory.CreateAsync(POpt("--brain"), POpt("--brain-url"), POpt("--model"));
+    using var brainHandle = brain;
+    if (!brainReady)
     {
-        Console.Error.WriteLine($"No local brain at {brain.Name}. Start Ollama (`ollama serve`), pull the model, "
-            + $"or point {Telekinesis.Pilot.OllamaBrain.UrlEnvVar} at a machine that has one.");
+        Console.Error.WriteLine(brainHint);
         return 1;
     }
     await using var pilotProvider = new BackendProvider();
     var pilotBackend = await pilotProvider.GetConnectedAsync();
-    Console.WriteLine($"■ pilot: \"{goal}\" on {app} via {brain.Name}{(dryRun ? " (dry-run)" : "")}\n");
+    Console.WriteLine($"■ pilot: \"{goal}\" on {app} via {brain!.Name}{(dryRun ? " (dry-run)" : "")}\n");
     var outcome = await Telekinesis.Pilot.PilotLoop.RunAsync(
-        pilotBackend, brain, app, goal,
+        pilotBackend, brain!, app, goal,
         maxSteps: int.TryParse(POpt("--max-steps"), out var ms) ? ms : 12,
         dryRun: dryRun, say: Console.WriteLine);
     Console.WriteLine($"\n{(outcome.Success ? "✓" : "✗")} {outcome.Reason} after {outcome.Steps} step(s). "
@@ -126,7 +126,7 @@ if (args.FirstOrDefault() == "pilot-eval")
     var traceFile = args.Skip(1).FirstOrDefault(a => a.EndsWith(".jsonl"));
     if (traceFile is null || !File.Exists(traceFile))
     {
-        Console.Error.WriteLine("Usage: telekinesis pilot-eval <trace.jsonl> [--model name] [--brain-url url]");
+        Console.Error.WriteLine("Usage: telekinesis pilot-eval <trace.jsonl> [--brain ollama|jev] [--model name] [--brain-url url]");
         return 2;
     }
     string? EOpt(string name)
@@ -134,14 +134,15 @@ if (args.FirstOrDefault() == "pilot-eval")
         var i = Array.IndexOf(args, name);
         return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
     }
-    using var evalBrain = new Telekinesis.Pilot.OllamaBrain(EOpt("--brain-url"), EOpt("--model"));
-    if (!await evalBrain.ProbeAsync())
+    var (evalBrain, evalReady, evalHint) = await BrainFactory.CreateAsync(EOpt("--brain"), EOpt("--brain-url"), EOpt("--model"));
+    using var evalHandle = evalBrain;
+    if (!evalReady)
     {
-        Console.Error.WriteLine($"No local brain at {evalBrain.Name}.");
+        Console.Error.WriteLine(evalHint);
         return 1;
     }
-    Console.WriteLine($"■ replaying {traceFile} through {evalBrain.Name}");
-    var eval = await Telekinesis.Pilot.PilotEval.ReplayAsync(traceFile, evalBrain, Console.WriteLine);
+    Console.WriteLine($"■ replaying {traceFile} through {evalBrain!.Name}");
+    var eval = await Telekinesis.Pilot.PilotEval.ReplayAsync(traceFile, evalBrain!, Console.WriteLine);
     Console.WriteLine($"\nsteps={eval.Steps} agreed={eval.Agreed} invalid={eval.Invalid} "
         + $"agreement={eval.AgreementRate:P0} latency median={eval.MedianMs} ms p95={eval.P95Ms} ms");
     return 0;

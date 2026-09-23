@@ -212,21 +212,26 @@ Exit `0` when a matching element is found within the timeout, `1` otherwise.
 On Windows it relays into the console session exactly like the one-shot verbs
 (see [HEADLESS-CLI.md](HEADLESS-CLI.md#the-windows-session-trap-and-the-relay)).
 
-## `telekinesis pilot` — the local-model UI brain
+## `telekinesis pilot` — the model-driven UI brain
 
 ```
-telekinesis pilot "<goal>" --app pid:N [--max-steps N] [--model name]
-                  [--brain-url url] [--dry-run] --enable-actions
+telekinesis pilot "<goal>" --app pid:N [--max-steps N] [--brain ollama|jev]
+                  [--model name] [--brain-url url] [--dry-run] --enable-actions
 ```
 
-A small local model plans one schema-constrained action per step over a compact
-candidate list; every step is trace-logged. `--max-steps` defaults to **12**.
-`--dry-run` plans without executing and is the only way to run it without
-`--enable-actions`. Needs a reachable Ollama-compatible brain. Details:
-[PILOT.md](PILOT.md).
+A model plans one schema-constrained action per step over a compact candidate
+list; every step is trace-logged. `--max-steps` defaults to **12**. `--dry-run`
+plans without executing and is the only way to run it without
+`--enable-actions`. Details: [PILOT.md](PILOT.md).
+
+`--brain` selects the step policy and defaults to **`ollama`** (a local
+Ollama-compatible model, which must be reachable). `jev` uses TypeSafe's
+System-1 model instead and needs `TELEKINESIS_JEV_KEY`; it answers enumerated
+questions rather than writing JSON, and **cannot perform the `type` verb** —
+see [PILOT.md](PILOT.md#system-1-the-jev-brain).
 
 ```
-telekinesis pilot-eval <trace.jsonl> [--model name] [--brain-url url]
+telekinesis pilot-eval <trace.jsonl> [--brain ollama|jev] [--model name] [--brain-url url]
 ```
 
 Replays a recorded trace through a brain without touching the UI and reports
@@ -302,6 +307,9 @@ changes nothing.
 | `TELEKINESIS_MEMORY_DIR` | perceptual memory | overrides the store (default `%LOCALAPPDATA%/Telekinesis/perceptual-memory`) |
 | `TELEKINESIS_BRAIN_URL` | `pilot` | Ollama-compatible endpoint ([PILOT.md](PILOT.md)) |
 | `TELEKINESIS_BRAIN_MODEL` | `pilot` | default model name |
+| `TELEKINESIS_JEV_KEY` | `pilot --brain jev` | TypeSafe API key; without it the brain refuses to start |
+| `TELEKINESIS_JEV_URL` | `pilot --brain jev` | endpoint override (default `https://api.typesafe.ai/v1/systemone`) |
+| `TELEKINESIS_JEV_MODEL` | `pilot --brain jev` | model name (default `jev-latest`) |
 | `XDG_STATE_HOME` | audit log, pilot traces | overrides the state directory — both `telekinesis/audit.log` and the `pilot` trace files land under it |
 | `SHELL` | `console_open` | the default shell on Linux/macOS (falls back to `/bin/sh`) |
 

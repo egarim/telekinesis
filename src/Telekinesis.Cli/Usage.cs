@@ -49,8 +49,9 @@ internal static class Usage
           assert [--role R] [--name N]           0/1 exit probe for CI
           probe [flags]                          exercise the backend from a terminal
           repl                                   persistent session, timed commands
-          pilot "<goal>" --app pid:N             local-model UI brain
+          pilot "<goal>" --app pid:N             model-driven UI brain
           pilot-eval <trace.jsonl>               replay a trace through a brain
+                     [--brain ollama|jev]        which step-policy model to use
           doctor                                 diagnose this machine
           setup                                  print the platform setup steps
           memory [export --out <dir>]            perceptual-memory stats / dataset

@@ -120,7 +120,14 @@ public static class PilotEval
                         ["candidates"] = candidates.DeepClone(),
                     }.ToJsonString();
 
-                    var (raw, ms) = await brain.DecideAsync(SystemPromptOf(), user, ct);
+                    // Rebuild the option set from the recorded candidates: a System-1
+                    // brain needs it explicitly, and the trace is the only source here.
+                    var options = candidates.Select(c => new BrainOption(
+                        (string)c!["id"]!,
+                        $"{(string?)c["role"]} \"{(string?)c["label"]}\""
+                            + ((string?)c["value"] is { Length: > 0 } v ? $" showing {v}" : ""))).ToList();
+
+                    var (raw, ms) = await brain.DecideAsync(SystemPromptOf(), user, options, ct);
                     latencies.Add(ms);
                     var action = PilotAction.Parse(raw, out var err);
                     if (err is not null || action!.Validate(ids) is not null) { invalid++; say($"  step {steps}: INVALID ({err})"); continue; }
