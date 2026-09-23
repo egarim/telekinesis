@@ -199,12 +199,6 @@ public class JevBrainTests
         Assert.Contains(JevBrain.KeyEnvVar, e.Message);
     }
 
-    [Fact]
-    public async Task Without_a_key_the_brain_reports_itself_unusable()
-    {
-        using var brain = new JevBrain(url: "https://api.example/v1/systemone", apiKey: "");
-        Assert.False(await brain.ProbeAsync());
-    }
 }
 
 // Holes found by attacking the "every answer is valid" claim rather than
@@ -270,5 +264,64 @@ public class JevBrainReachableHoles
         var e = await Assert.ThrowsAsync<InvalidOperationException>(
             () => brain.DecideAsync("sys", "state", [new("c1", "Button")]));
         Assert.Contains("key", e.Message);
+    }
+}
+
+/// <summary>
+/// The contract is served by more than one thing: open-jev runs /v1/systemone
+/// from a local Gemma on Apple silicon and needs no key unless OPENJEV_API_KEY
+/// is set. A brain that demands a key could not talk to it at all.
+/// </summary>
+public class JevBrainLocalServerTests
+{
+    private sealed class Server(Func<HttpRequestMessage, (System.Net.HttpStatusCode, string)> reply) : HttpMessageHandler
+    {
+        public readonly List<HttpRequestMessage> Seen = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+        {
+            Seen.Add(r);
+            var (status, body) = reply(r);
+            return Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
+    [Fact]
+    public async Task A_keyless_server_that_answers_health_is_usable()
+    {
+        var server = new Server(r => r.RequestUri!.AbsolutePath == "/health"
+            ? (System.Net.HttpStatusCode.OK, """{"status":"ok"}""")
+            : (System.Net.HttpStatusCode.NotFound, "{}"));
+        using var brain = new JevBrain(url: JevBrain.LocalUrl, apiKey: "", http: new HttpClient(server));
+        Assert.True(await brain.ProbeAsync());
+        Assert.Equal("http://localhost:8000/health", server.Seen[0].RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task No_key_means_no_Authorization_header_at_all()
+    {
+        var server = new Server(_ => (System.Net.HttpStatusCode.OK,
+            """{"answers":{"action":{"choice":"wait"}}}"""));
+        using var brain = new JevBrain(url: JevBrain.LocalUrl, apiKey: "", http: new HttpClient(server));
+        await brain.DecideAsync("sys", "state", [new("c1", "Button")]);
+        Assert.False(server.Seen[0].Headers.Contains("Authorization"));
+    }
+
+    [Fact]
+    public async Task Without_a_key_and_without_a_server_the_brain_is_not_usable()
+    {
+        var server = new Server(_ => (System.Net.HttpStatusCode.NotFound, "{}"));
+        using var brain = new JevBrain(url: JevBrain.DefaultUrl, apiKey: "", http: new HttpClient(server));
+        Assert.False(await brain.ProbeAsync());
+    }
+
+    [Fact]
+    public async Task A_key_alone_is_enough_when_there_is_no_health_endpoint()
+    {
+        var server = new Server(_ => (System.Net.HttpStatusCode.NotFound, "{}"));
+        using var brain = new JevBrain(url: JevBrain.DefaultUrl, apiKey: "k", http: new HttpClient(server));
+        Assert.True(await brain.ProbeAsync());
     }
 }

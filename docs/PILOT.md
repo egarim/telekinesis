@@ -104,14 +104,45 @@ probability distribution and a confidence. The action schema stops being
 something we parse and becomes something the request enforces.
 
 ```
-export TELEKINESIS_JEV_KEY=...            # required; no key, no start
+export TELEKINESIS_JEV_KEY=...            # the hosted API
 telekinesis pilot "compute 7 plus 7" --app pid:N --brain jev --enable-actions
 telekinesis pilot-eval <trace.jsonl> --brain jev
 ```
 
-| | `TELEKINESIS_JEV_URL` | default `https://api.typesafe.ai/v1/systemone` |
-|---|---|---|
-| | `TELEKINESIS_JEV_MODEL` | default `jev-latest` |
+| variable | default |
+|---|---|
+| `TELEKINESIS_JEV_URL` | `https://api.typesafe.ai/v1/systemone` |
+| `TELEKINESIS_JEV_MODEL` | `jev-latest` |
+| `TELEKINESIS_JEV_KEY` | unset |
+
+### Running it locally with open-jev
+
+The `/v1/systemone` contract is not exclusive to the hosted API.
+[open-jev](https://github.com/daseinlabs/open-jev) serves the same routes from a
+local model on Apple silicon: it prefills the context once, expands that KV cache
+across the option batch, and scores every option in **one padded forward pass** —
+no decoding anywhere. That is the mechanism the whole idea rests on, and it runs
+on a laptop.
+
+```
+git clone https://github.com/daseinlabs/open-jev && cd open-jev
+make venv
+.venv/bin/hf download mlx-community/Qwen3-4B-Instruct-2507-4bit --local-dir models/qwen
+.venv/bin/openjev serve --port 8000 --model models/qwen
+
+export TELEKINESIS_JEV_URL=http://localhost:8000/v1/systemone   # no key needed
+telekinesis pilot-eval <trace.jsonl> --brain jev
+```
+
+No key is required unless the server sets `OPENJEV_API_KEY`, so `--brain jev`
+treats the key as optional and decides usability by asking `GET /health` first,
+falling back to "is a key configured" for the hosted API, which publishes no
+health endpoint.
+
+`make setup` pulls `google/gemma-3-4b-it`, which is gated. `mlx_lm.load` accepts
+any repo id, and **using the pilot's own model makes the comparison controlled**:
+`mlx-community/Qwen3-4B-Instruct-2507-4bit` is the same 4B the Ollama brain runs,
+so the only variable left is scoring options versus decoding JSON.
 
 The mapping is direct: `PilotAction` is one verb plus one candidate id, so the
 request carries a `choice` over the verbs and a `choice` over the ids

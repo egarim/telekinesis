@@ -35,8 +35,10 @@ public static class BrainFactory
                 var brain = new JevBrain(url, model);
                 return await brain.ProbeAsync(ct)
                     ? (brain, true, "")
-                    : (brain, false, $"No Jev API key. Set {JevBrain.KeyEnvVar} to a TypeSafe key "
-                        + $"(override the endpoint with {JevBrain.UrlEnvVar}).");
+                    : (brain, false, $"No Jev brain at {brain.Name}. Either set {JevBrain.KeyEnvVar} to a "
+                        + $"TypeSafe key, or run a server speaking the same contract and point "
+                        + $"{JevBrain.UrlEnvVar} at it (open-jev serves {JevBrain.LocalUrl} from a local "
+                        + "Gemma on Apple silicon).");
             }
             default:
                 return (null, false, $"Unknown brain '{kind}'. Use one of: {string.Join(", ", Kinds)}.");

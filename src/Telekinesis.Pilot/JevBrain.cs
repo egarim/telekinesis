@@ -26,6 +26,12 @@ public sealed class JevBrain : ILocalBrain
     public const string ModelEnvVar = "TELEKINESIS_JEV_MODEL";
 
     public const string DefaultUrl = "https://api.typesafe.ai/v1/systemone";
+
+    /// <summary>Any server speaking the same contract works — notably
+    /// <see href="https://github.com/daseinlabs/open-jev">open-jev</see>, which serves
+    /// /v1/systemone from a local Gemma 3 4B on Apple silicon. It needs no key unless
+    /// OPENJEV_API_KEY is set, which is why the key here is optional.</summary>
+    public const string LocalUrl = "http://localhost:8000/v1/systemone";
     public const string DefaultModel = "jev-latest";
 
     /// <summary>Sentinel option for "this action needs no target" — a choice set
@@ -84,19 +90,37 @@ public sealed class JevBrain : ILocalBrain
     public string Name => $"{_model} @ {_url}";
 
     /// <summary>
-    /// Whether this brain is usable. Unlike Ollama there is no health endpoint,
-    /// and a real request costs money — so this checks only that a key is
-    /// configured. A wrong key still fails at the first decision with 401.
+    /// Whether this brain is usable. A self-hosted server (open-jev) answers
+    /// GET /health and may need no key at all; the hosted API publishes no health
+    /// endpoint and always needs one. So: a health check decides it when the server
+    /// answers, and otherwise a configured key is the only evidence available —
+    /// a wrong key still fails at the first decision with 401.
     /// </summary>
-    public Task<bool> ProbeAsync(CancellationToken ct = default) =>
-        Task.FromResult(!string.IsNullOrWhiteSpace(_key));
+    public async Task<bool> ProbeAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(3));
+            using var response = await _http.GetAsync(HealthUrl, cts.Token);
+            if (response.IsSuccessStatusCode) return true;
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            // No health endpoint (or nothing listening) — fall through to the key.
+        }
+        return !string.IsNullOrWhiteSpace(_key);
+    }
+
+    /// <summary>/health sits at the server root, beside the versioned route.</summary>
+    private string HealthUrl =>
+        Uri.TryCreate(_url, UriKind.Absolute, out var uri)
+            ? new Uri(uri, "/health").ToString()
+            : _url + "/health";
 
     public async Task<(string Json, int LatencyMs)> DecideAsync(
         string system, string user, IReadOnlyList<BrainOption> targets, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(_key))
-            throw new InvalidOperationException($"No Jev API key. Set {KeyEnvVar}.");
-
         // Offer only verbs that can actually be completed from here. With no
         // candidates there is no target question, so a "click" answer could never
         // be finished — same reasoning that keeps `type` off the menu entirely.
@@ -169,7 +193,8 @@ public sealed class JevBrain : ILocalBrain
             {
                 Content = JsonContent.Create(payload),
             };
-            request.Headers.Add("Authorization", $"Bearer {_key}");
+            // Optional: a local open-jev server only demands one when OPENJEV_API_KEY is set.
+            if (!string.IsNullOrWhiteSpace(_key)) request.Headers.Add("Authorization", $"Bearer {_key}");
             response = await _http.SendAsync(request, ct);
             if (response.IsSuccessStatusCode) return response;
             if (response.StatusCode is not (HttpStatusCode.TooManyRequests or (HttpStatusCode)529)) break;
