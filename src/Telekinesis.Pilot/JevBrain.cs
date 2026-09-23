@@ -282,7 +282,11 @@ public sealed class JevBrain : ILocalBrain
         foreach (var (option, value) in probabilities)
         {
             if (option == NoTarget || value is null) continue;
-            var p = value.GetValue<double>();
+            // A server is free to render 0.8 as a JSON string; GetValue<double>()
+            // throws on that, and a formatting choice must not crash the brain.
+            // Unreadable values are skipped, and the caller falls back to the
+            // ranked head — the same path as no distribution at all.
+            if (!value.AsValue().TryGetValue<double>(out var p)) continue;
             if (p <= bestP) continue;
             bestP = p;
             best = option;

@@ -375,3 +375,38 @@ public class JevBrainQuestionCountTests
         Assert.Equal("enter", PilotAction.Parse(json, out _)!.Text);
     }
 }
+
+/// <summary>
+/// A probability that arrives as an integer (1, 0) or a string is still a
+/// probability. GetValue&lt;double&gt;() is strict about the underlying JSON type,
+/// so this is where a real server's formatting choices would crash the brain.
+/// </summary>
+public class JevBrainProbabilityParsingTests
+{
+    private sealed class Once(string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+    }
+
+    private static async Task<PilotAction> Decide(string probabilities)
+    {
+        var body = """{"answers":{"action":{"choice":"click"},"target":{"choice":"none","probabilities":{"""
+            + probabilities
+            + """}}}}""";
+        using var brain = new JevBrain(url: JevBrain.LocalUrl, apiKey: "", http: new HttpClient(new Once(body)));
+        var (json, _) = await brain.DecideAsync("sys", "state", [new("c1", "a"), new("c2", "b")]);
+        return PilotAction.Parse(json, out _)!;
+    }
+
+    [Fact]
+    public async Task Integer_probabilities_are_read_not_thrown_on() =>
+        Assert.Equal("c2", (await Decide(""" "c1": 0, "c2": 1, "none": 0 """)).Target);
+
+    [Fact]
+    public async Task String_probabilities_degrade_to_the_ranked_head_instead_of_crashing() =>
+        Assert.Equal("c1", (await Decide(""" "c1": "0.2", "c2": "0.8" """)).Target);
+}
