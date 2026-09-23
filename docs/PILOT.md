@@ -119,6 +119,14 @@ request carries a `choice` over the verbs and a `choice` over the ids
 is the same information the prose prompt carries. A `none` sentinel covers the
 verbs that act on no element, and never escapes as a target.
 
+The option set is trimmed to what can actually be completed from the current
+state: with no candidates on screen there is no target question, so `click` is
+not offered either. The two questions are answered independently in one pass, so
+a `click` can still arrive paired with `none` — in that case the brain takes the
+most probable real option, falling back to the head of the ranked candidate
+list. That is a substitution, not a reading of intent, and it is made because an
+action the loop rejects costs a retry and teaches a System-1 brain nothing.
+
 ### What it cannot do
 
 **`type` is not offered at all.** It needs a generated string, and a System-1

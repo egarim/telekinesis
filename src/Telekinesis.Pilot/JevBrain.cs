@@ -97,12 +97,20 @@ public sealed class JevBrain : ILocalBrain
         if (string.IsNullOrWhiteSpace(_key))
             throw new InvalidOperationException($"No Jev API key. Set {KeyEnvVar}.");
 
+        // Offer only verbs that can actually be completed from here. With no
+        // candidates there is no target question, so a "click" answer could never
+        // be finished — same reasoning that keeps `type` off the menu entirely.
+        var offered = targets.Take(MaxTargets).ToList();
+        var actions = offered.Count > 0
+            ? ActionCriteria
+            : ActionCriteria.Where(kv => kv.Key != "click").ToDictionary(kv => kv.Key, kv => kv.Value);
+
         var questions = new JsonObject
         {
             ["action"] = Choice(
                 "Choose the single next action that makes progress toward the goal, given the "
                 + "current screen, the readouts, and what the previous action did.",
-                ActionCriteria),
+                actions),
             ["key"] = Choice(
                 "If — and only if — the action is 'press', which key combination should be sent? "
                 + "Ignored for every other action.",
@@ -111,7 +119,6 @@ public sealed class JevBrain : ILocalBrain
 
         // A choice needs something to choose between: with no candidates there is
         // no target question at all, rather than one whose only option is "none".
-        var offered = targets.Take(MaxTargets).ToList();
         if (offered.Count > 0)
         {
             var criteria = new Dictionary<string, string>(offered.Count + 1);
@@ -131,7 +138,7 @@ public sealed class JevBrain : ILocalBrain
             ["questions"] = questions,
         }, ct);
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!;
-        return (Translate(body), (int)sw.ElapsedMilliseconds);
+        return (Translate(body, offered), (int)sw.ElapsedMilliseconds);
     }
 
     private static JsonObject Choice(string instructions, IReadOnlyDictionary<string, string> criteria)
@@ -186,7 +193,7 @@ public sealed class JevBrain : ILocalBrain
     /// The confidence rides along: PilotAction ignores unknown fields, and the
     /// trace records the raw string — so calibration lands in the dataset for free.
     /// </summary>
-    private static string Translate(JsonNode body)
+    private static string Translate(JsonNode body, IReadOnlyList<BrainOption> offered)
     {
         var answers = body["answers"]?.AsObject()
             ?? throw new InvalidOperationException("Jev returned no answers.");
@@ -205,11 +212,19 @@ public sealed class JevBrain : ILocalBrain
         // spending a retry: the distribution is already in the reply.
         if (action is "click")
         {
-            if (target is null or NoTarget) target = MostProbableTarget(answers["target"]);
-            if (target is not null) result["target"] = target;
+            // `click` is only offered when candidates exist, so the last resort is
+            // always available: the list is RANKED, so its head is the best guess
+            // the loop has — better than an action Validate rejects, which costs a
+            // retry and teaches a System-1 brain nothing.
+            target = target is null or NoTarget
+                ? MostProbableTarget(answers["target"]) ?? offered[0].Id
+                : target;
+            result["target"] = target;
         }
-        if (action is "press" && Chosen("key") is { } key)
-            result["text"] = key;
+        if (action is "press")
+            result["text"] = Chosen("key")
+                ?? throw new InvalidOperationException(
+                    "Jev chose 'press' but returned no 'key' answer; the reply is malformed.");
         if (answers["action"]?["confidence"] is JsonNode confidence)
             result["confidence"] = confidence.DeepClone();
 

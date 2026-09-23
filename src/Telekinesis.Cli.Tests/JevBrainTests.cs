@@ -206,3 +206,69 @@ public class JevBrainTests
         Assert.False(await brain.ProbeAsync());
     }
 }
+
+// Holes found by attacking the "every answer is valid" claim rather than
+// restating it. Both were reachable before the fix.
+public class JevBrainReachableHoles
+{
+    private sealed class Fake(JsonObject reply) : HttpMessageHandler
+    {
+        public JsonObject? Request;
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+        {
+            Request = JsonNode.Parse(await r.Content!.ReadAsStringAsync(ct))!.AsObject();
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(reply.ToJsonString(), Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
+    private static JsonObject Reply(JsonObject answers) => new() { ["answers"] = answers };
+
+    [Fact]
+    public async Task With_no_candidates_click_is_not_even_offered()
+    {
+        // There is no target question when there are no candidates, so a "click"
+        // answer could never be completed — it must not be on the menu.
+        var fake = new Fake(Reply(new JsonObject
+        {
+            ["action"] = new JsonObject { ["choice"] = "wait" },
+        }));
+        using var brain = new JevBrain(url: "https://api.example", apiKey: "k", http: new HttpClient(fake));
+        await brain.DecideAsync("sys", "state", []);
+        Assert.DoesNotContain("click", fake.Request!["questions"]!["action"]!["criteria"]!.AsObject().Select(kv => kv.Key));
+    }
+
+    [Fact]
+    public async Task Click_with_no_target_and_no_probabilities_still_yields_a_valid_action()
+    {
+        // The candidate list is ranked, so the top entry is the defensible guess
+        // when the reply carries nothing better. The alternative is an action the
+        // loop rejects, which costs a retry and teaches the brain nothing.
+        var fake = new Fake(Reply(new JsonObject
+        {
+            ["action"] = new JsonObject { ["choice"] = "click" },
+            ["target"] = new JsonObject { ["choice"] = JevBrain.NoTarget },
+        }));
+        using var brain = new JevBrain(url: "https://api.example", apiKey: "k", http: new HttpClient(fake));
+        var (json, _) = await brain.DecideAsync("sys", "state", [new("c1", "Button \"Seven\""), new("c2", "Button \"Eight\"")]);
+        var action = PilotAction.Parse(json, out var error);
+        Assert.Null(error);
+        Assert.Equal("c1", action!.Target);
+        Assert.Null(action.Validate(new HashSet<string> { "c1", "c2" }));
+    }
+
+    [Fact]
+    public async Task A_press_answer_with_no_key_is_a_malformed_reply_not_a_silent_invalid_action()
+    {
+        var fake = new Fake(Reply(new JsonObject
+        {
+            ["action"] = new JsonObject { ["choice"] = "press" },
+        }));
+        using var brain = new JevBrain(url: "https://api.example", apiKey: "k", http: new HttpClient(fake));
+        var e = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => brain.DecideAsync("sys", "state", [new("c1", "Button")]));
+        Assert.Contains("key", e.Message);
+    }
+}
