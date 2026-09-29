@@ -136,6 +136,28 @@ public class UsageTests
         => Assert.False(IsHelp(args));
 
     [Theory]
+    // `--flag=value` carries its own value, so it consumes nothing and the next
+    // argument is a fresh one. Reading it as "a flag expecting a value" swallowed
+    // a genuine help request.
+    [InlineData("serve", "--port=3001", "--help")]
+    [InlineData("serve", "--port=3001", "-h")]
+    [InlineData("repl", "--app=pid:1", "--help")]
+    public void A_flag_carrying_its_own_value_does_not_swallow_the_next_argument(params string[] args)
+        => Assert.True(IsHelp(args));
+
+    [Theory]
+    // `pilot`'s operand is free-form human text, so a bare `help` there is the goal.
+    // The flags after it are still scanned, which is why the third case is help.
+    [InlineData("pilot", "help", "--app", "pid:1", "--dry-run")]
+    [InlineData("pilot", "help")]
+    public void A_free_text_operand_is_not_a_help_request(params string[] args)
+        => Assert.False(IsHelp(args));
+
+    [Fact]
+    public void But_a_flag_after_that_operand_still_asks_for_help()
+        => Assert.True(IsHelp(["pilot", "help", "--dry-run", "--help"]));
+
+    [Theory]
     // One-shot verbs own their whole line: launch forwards operands to the child,
     // and no verb's operands may be hijacked.
     [InlineData("launch", "--help")]
