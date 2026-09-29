@@ -113,7 +113,20 @@ public sealed class ConPtyConsoleSession : IConsoleSession
             _input.Write(bytes, 0, bytes.Length);
             _input.Flush();
         });
-        return write.Wait(timeout);
+
+        // Observe the fault either way: Wait(timeout) THROWS AggregateException when
+        // the write faults before the timeout — a failed write must report false, not
+        // blow up the MCP request — and a fault arriving after we stop waiting would
+        // otherwise go unobserved (the pipe is disposed out from under it at Dispose).
+        write.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+        try
+        {
+            return write.Wait(timeout);
+        }
+        catch (AggregateException)
+        {
+            return false;
+        }
     }
 
 

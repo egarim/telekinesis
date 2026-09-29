@@ -23,6 +23,11 @@ public sealed class ConsoleSessionService : IDisposable
 
     private readonly ConcurrentDictionary<string, Entry> _sessions = new();
     private int _next;
+    /// <summary>Slots RESERVED, not sessions inserted. Counting the dictionary and
+    /// then spawning let concurrent opens all see room and all get it: the check and
+    /// the claim have to be one atomic step, and the claim has to happen before the
+    /// child process exists.</summary>
+    private int _reserved;
     private volatile bool _disposed;
 
     public Entry Open(string? shell, int cols, int rows)
@@ -51,30 +56,44 @@ public sealed class ConsoleSessionService : IDisposable
                 + "(ConPTY child-attach limitation, issue #46). Linux/macOS are supported; "
                 + "set TELEKINESIS_CONPTY=1 to force-enable the experimental Windows path.");
 
-        // Refuse BEFORE spawning anything, and name the way out — an agent that hits
-        // the cap needs to know it should close sessions, not retry (issue #62).
-        if (_sessions.Count >= MaxSessions)
+        // Claim a slot BEFORE spawning anything, and name the way out — an agent that
+        // hits the cap needs to know it should close sessions, not retry (issue #62).
+        if (Interlocked.Increment(ref _reserved) > MaxSessions)
+        {
+            Interlocked.Decrement(ref _reserved);
             throw new InvalidOperationException(
                 $"Too many console sessions ({_sessions.Count}/{MaxSessions}). "
                 + "Close one with console_close; console_list shows what is open.");
+        }
 
-        var screen = new TerminalScreen(cols, rows);
-        IConsoleSession session =
-#if WINDOWS
-            new Telekinesis.Windows.ConPtyConsoleSession(shell, cols, rows, screen.Feed);
-#else
-            OperatingSystem.IsWindows()
-                ? throw new PlatformNotSupportedException(
-                    "This build does not include ConPTY; run the net10.0-windows target.")
-                : new Telekinesis.Linux.UnixPtyConsoleSession(shell, cols, rows, screen.Feed);
-#endif
-        var entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
-        _sessions[entry.Id] = entry;
-        // If Dispose() raced ahead of the insert, this session would leak — reap it now.
-        if (_disposed && _sessions.TryRemove(entry.Id, out _))
+        Entry entry;
+        try
         {
-            session.Dispose();
-            throw new ObjectDisposedException(nameof(ConsoleSessionService));
+            var screen = new TerminalScreen(cols, rows);
+            IConsoleSession session =
+#if WINDOWS
+                new Telekinesis.Windows.ConPtyConsoleSession(shell, cols, rows, screen.Feed);
+#else
+                OperatingSystem.IsWindows()
+                    ? throw new PlatformNotSupportedException(
+                        "This build does not include ConPTY; run the net10.0-windows target.")
+                    : new Telekinesis.Linux.UnixPtyConsoleSession(shell, cols, rows, screen.Feed);
+#endif
+            entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
+            _sessions[entry.Id] = entry;
+            // If Dispose() raced ahead of the insert, this session would leak — reap it now.
+            if (_disposed && _sessions.TryRemove(entry.Id, out _))
+            {
+                session.Dispose();
+                throw new ObjectDisposedException(nameof(ConsoleSessionService));
+            }
+        }
+        catch
+        {
+            // The slot was claimed before the child existed; give it back on any
+            // failure, or a few failed spawns would permanently shrink the cap.
+            Interlocked.Decrement(ref _reserved);
+            throw;
         }
         return entry;
     }
@@ -84,6 +103,7 @@ public sealed class ConsoleSessionService : IDisposable
     /// RegisterForTest).</summary>
     internal Entry RegisterForTest(IConsoleSession session, TerminalScreen screen)
     {
+        Interlocked.Increment(ref _reserved);
         var entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
         _sessions[entry.Id] = entry;
         return entry;
@@ -100,7 +120,11 @@ public sealed class ConsoleSessionService : IDisposable
     {
         // TryRemove makes exactly one caller win the entry, so Close/Dispose never
         // double-dispose the same session.
-        if (_sessions.TryRemove(id, out var e)) e.Session.Dispose();
+        if (_sessions.TryRemove(id, out var e))
+        {
+            Interlocked.Decrement(ref _reserved);
+            e.Session.Dispose();
+        }
         else throw new KeyNotFoundException($"No console session '{id}'.");
     }
 
@@ -109,7 +133,10 @@ public sealed class ConsoleSessionService : IDisposable
         _disposed = true;
         foreach (var id in _sessions.Keys)
             if (_sessions.TryRemove(id, out var e))
+            {
+                Interlocked.Decrement(ref _reserved);
                 e.Session.Dispose();
+            }
     }
 }
 

@@ -116,6 +116,14 @@ public sealed partial class UnixPtyConsoleSession : IConsoleSession
         var off = 0;
         while (off < bytes.Length)
         {
+            // The deadline governs EVERY iteration, not only the queue-full branch.
+            // Checking it only under EAGAIN left two ways to run past it: a child
+            // that keeps draining makes write() return n>0 indefinitely (a large
+            // enough paste to a fast reader never sees EAGAIN at all), and a signal
+            // storm keeps returning EINTR. Both "make progress", and progress is not
+            // the bound this promises.
+            if (Environment.TickCount64 >= deadline) return false;
+
             var n = (int)WriteFd(_master, in bytes[off], bytes.Length - off);
             if (n > 0) { off += n; continue; }
 

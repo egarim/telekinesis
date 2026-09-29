@@ -146,3 +146,56 @@ public class ConsoleWriteTests
         consoles.Close(entry.Id);
     }
 }
+
+/// <summary>
+/// Issue #62's cap has to hold under concurrency. Counting the dictionary and then
+/// spawning is not a cap: every concurrent caller can see room and every one of
+/// them can take it. This opens far more sessions at once than the cap allows and
+/// asserts the count, which is the only way that distinguishes a claim from a check.
+/// </summary>
+public class ConsoleSessionCapRaceTests
+{
+    [Fact]
+    public void Concurrent_opens_cannot_exceed_the_cap()
+    {
+        if (OperatingSystem.IsWindows()) return; // ConPTY is off by default (#46)
+
+        using var svc = new ConsoleSessionService();
+        var attempts = ConsoleSessionService.MaxSessions * 3;
+        var opened = 0;
+        var refused = 0;
+
+        Parallel.For(0, attempts, _ =>
+        {
+            try
+            {
+                svc.Open("/bin/sh", 40, 10);
+                Interlocked.Increment(ref opened);
+            }
+            catch (InvalidOperationException)
+            {
+                Interlocked.Increment(ref refused);
+            }
+        });
+
+        Assert.Equal(ConsoleSessionService.MaxSessions, opened);
+        Assert.Equal(attempts - ConsoleSessionService.MaxSessions, refused);
+        Assert.Equal(ConsoleSessionService.MaxSessions, svc.List().Count);
+    }
+
+    [Fact]
+    public void Closing_a_session_gives_its_slot_back()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        using var svc = new ConsoleSessionService();
+        var ids = new List<string>();
+        for (var i = 0; i < ConsoleSessionService.MaxSessions; i++) ids.Add(svc.Open("/bin/sh", 40, 10).Id);
+        Assert.Throws<InvalidOperationException>(() => svc.Open("/bin/sh", 40, 10));
+
+        svc.Close(ids[0]);
+        var replacement = svc.Open("/bin/sh", 40, 10);   // the freed slot is reusable
+        Assert.NotNull(replacement);
+        Assert.Throws<InvalidOperationException>(() => svc.Open("/bin/sh", 40, 10));
+    }
+}
