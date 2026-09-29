@@ -15,12 +15,19 @@ The one exception is a **one-shot verb**, which owns its own arguments:
 `telekinesis apps --help` still runs the verb. Those lines carry operands that must
 never be hijacked.
 
-On every other line, a help word anywhere wins — and that has a known limit worth
-stating rather than glossing: it cannot tell a flag from a flag's **value**. So
-`telekinesis probe --type "--help"` prints help instead of typing that literal
-string. No realistic value is the bare word `--help`, and the cost the other way
-was `serve --help` silently starting a server; if you ever do need to pass one of
-these words as a value, use a one-shot verb with `--`.
+On every other line a help word wins **unless it sits in a flag's value
+position** — a help word directly after a flag is that flag's value, not a
+request for help. So `assert --name help` really asserts on a control named
+"help", and `probe --type "--help"` types that literal string.
+
+The exception is a flag that takes no value (`--enable-actions`, `--read-only`,
+`--dry-run`, …), where `serve --enable-actions --help` is genuinely asking for
+help.
+
+That rule exists because getting it wrong was not hypothetical: `assert` is the
+0/1 CI probe, `--name` is a substring query, and `assert --role Button --name help`
+is an ordinary assertion. Treating it as a help request made a failing CI gate
+exit 0 silently.
 
 Accepted spellings, in both positions: `--help`, `-h`, `-?`, `/?`, `help`.
 For version: `--version`, `-v` (first argument only).

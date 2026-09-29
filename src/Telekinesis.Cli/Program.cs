@@ -19,21 +19,15 @@ using Telekinesis.Cli;
 // operands verbatim — `launch app.exe --help` must reach the launched program, and
 // `apps --help` must still list applications.
 //
-// Known and accepted limitation: on the non-verb paths this cannot tell a flag from
-// a flag's VALUE, so `probe --type "--help"` prints help instead of typing that
-// literal string. No realistic value is the bare word `--help`, and the cost the
-// other way was `serve --help` silently starting a server. Documented in
-// docs/CLI.md rather than papered over.
-string[] helpWords = ["--help", "-h", "-?", "/?", "help"];
-var oneShotOwnsArgs = OneShot.CanHandle(args.FirstOrDefault());
-if (helpWords.Contains(args.FirstOrDefault())
-    || (!oneShotOwnsArgs && args.Any(helpWords.Contains)))
+// See Usage.IsHelpRequest for the rule and why a help word in a flag's VALUE
+// position must NOT count (it turned `assert --name help` into a silent exit 0).
+if (Usage.IsHelpRequest(args, OneShot.CanHandle))
 {
     Console.WriteLine(Usage.Text);
     return 0;
 }
 
-if (args.FirstOrDefault() is "--version" or "-v")
+if (Usage.IsVersionRequest(args))
 {
     Console.WriteLine(Usage.Version);
     return 0;
