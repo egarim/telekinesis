@@ -48,13 +48,20 @@ every mutating call is audit-logged.
 | Tool | Parameters | Returns |
 |---|---|---|
 | `console_open` | `shell` (empty = `cmd.exe` on Windows, `$SHELL` else `/bin/sh`), `cols` (default 120), `rows` (default 30) | `{sessionId, shell, cols, rows, screen}` |
-| `console_write` | `sessionId`, `text`, `sendEnter` (default **true**) | `{ok, alive}` |
+| `console_write` | `sessionId`, `text`, `sendEnter` (default **true**) | `{ok, alive, note?}` |
 | `console_read` | `sessionId`, `lines` (0 = whole screen) | `{screen, alive}` |
 | `console_resize` | `sessionId`, `cols`, `rows` (clamped to 2–1000) | `{ok, cols, rows}` |
 | `console_close` | `sessionId` | `{ok}` |
 | `console_list` | — | `[{sessionId, shell, alive, opened}]` |
 
 Session ids are `con1`, `con2`, … and are unique per server process.
+
+At most **16 sessions** may be open at once. `console_open` claims its slot before
+spawning anything and refuses beyond the cap rather than starting another child
+process, naming `console_list` / `console_close` in the error
+([#62](https://github.com/egarim/telekinesis/issues/62)). A session whose child has
+**exited still holds its slot** until you `console_close` it — `console_list` shows
+`alive: false` for those.
 
 ### The read model
 
@@ -101,6 +108,34 @@ keypress, or sending a control character:
 
 Arrow keys and function keys are the usual ANSI sequences — up is
 `"\u001b[A"`, down `"\u001b[B"`, right `"\u001b[C"`, left `"\u001b[D"`.
+
+### When the child stops reading
+
+A PTY master **blocks** once the child's input queue fills. A program that has
+stopped reading stdin — hung, or waiting on something else — would otherwise make
+`console_write` hang the whole MCP request, with no timeout and no way to cancel
+it ([#61](https://github.com/egarim/telekinesis/issues/61)). A human never fills
+the kernel buffer by typing; a model can paste megabytes in one call.
+
+Writes are therefore bounded at **5 seconds**. On a timeout you get:
+
+```json
+{ "ok": false, "alive": true, "note": "The child is not reading stdin, so the write timed out and may have landed only partially. …" }
+```
+
+`ok: false` means the text may have landed **partially** — check `console_read`
+before deciding what to do, and do not simply retry the same write.
+
+On Linux and macOS the bound is enforced in the write itself: the pty master is
+non-blocking, so a write returns a short count rather than blocking, and the
+deadline is re-checked on **every** iteration — including the ones that made
+progress. Checking it only when the queue was full left a large paste to a
+*fast*-draining child running past the timeout, because such a write never sees
+EAGAIN at all. On the
+experimental Windows path it bounds **the caller** only: the underlying pipe write
+cannot be interrupted, so it continues on a background thread and is abandoned.
+That is acceptable there only because the ConPTY path is off by default and
+already unusable ([#46](https://github.com/egarim/telekinesis/issues/46)).
 
 ### Lifetime
 

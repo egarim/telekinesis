@@ -15,8 +15,19 @@ public sealed class ConsoleSessionService : IDisposable
 {
     public sealed record Entry(string Id, IConsoleSession Session, TerminalScreen Screen, DateTimeOffset Opened);
 
+    /// <summary>Most sessions alive at once (issue #62). Each is a live child
+    /// process plus a screen, and sessions only die on console_close or server exit —
+    /// so an agent that opens and never closes leaks processes for the life of the
+    /// server. Nothing else in this tier is unbounded any more.</summary>
+    public const int MaxSessions = 16;
+
     private readonly ConcurrentDictionary<string, Entry> _sessions = new();
     private int _next;
+    /// <summary>Slots RESERVED, not sessions inserted. Counting the dictionary and
+    /// then spawning let concurrent opens all see room and all get it: the check and
+    /// the claim have to be one atomic step, and the claim has to happen before the
+    /// child process exists.</summary>
+    private int _reserved;
     private volatile bool _disposed;
 
     public Entry Open(string? shell, int cols, int rows)
@@ -45,23 +56,44 @@ public sealed class ConsoleSessionService : IDisposable
                 + "(ConPTY child-attach limitation, issue #46). Linux/macOS are supported; "
                 + "set TELEKINESIS_CONPTY=1 to force-enable the experimental Windows path.");
 
-        var screen = new TerminalScreen(cols, rows);
-        IConsoleSession session =
-#if WINDOWS
-            new Telekinesis.Windows.ConPtyConsoleSession(shell, cols, rows, screen.Feed);
-#else
-            OperatingSystem.IsWindows()
-                ? throw new PlatformNotSupportedException(
-                    "This build does not include ConPTY; run the net10.0-windows target.")
-                : new Telekinesis.Linux.UnixPtyConsoleSession(shell, cols, rows, screen.Feed);
-#endif
-        var entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
-        _sessions[entry.Id] = entry;
-        // If Dispose() raced ahead of the insert, this session would leak — reap it now.
-        if (_disposed && _sessions.TryRemove(entry.Id, out _))
+        // Claim a slot BEFORE spawning anything, and name the way out — an agent that
+        // hits the cap needs to know it should close sessions, not retry (issue #62).
+        if (Interlocked.Increment(ref _reserved) > MaxSessions)
         {
-            session.Dispose();
-            throw new ObjectDisposedException(nameof(ConsoleSessionService));
+            Interlocked.Decrement(ref _reserved);
+            throw new InvalidOperationException(
+                $"Too many console sessions ({_sessions.Count}/{MaxSessions}). "
+                + "Close one with console_close; console_list shows what is open.");
+        }
+
+        Entry entry;
+        try
+        {
+            var screen = new TerminalScreen(cols, rows);
+            IConsoleSession session =
+#if WINDOWS
+                new Telekinesis.Windows.ConPtyConsoleSession(shell, cols, rows, screen.Feed);
+#else
+                OperatingSystem.IsWindows()
+                    ? throw new PlatformNotSupportedException(
+                        "This build does not include ConPTY; run the net10.0-windows target.")
+                    : new Telekinesis.Linux.UnixPtyConsoleSession(shell, cols, rows, screen.Feed);
+#endif
+            entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
+            _sessions[entry.Id] = entry;
+            // If Dispose() raced ahead of the insert, this session would leak — reap it now.
+            if (_disposed && _sessions.TryRemove(entry.Id, out _))
+            {
+                session.Dispose();
+                throw new ObjectDisposedException(nameof(ConsoleSessionService));
+            }
+        }
+        catch
+        {
+            // The slot was claimed before the child existed; give it back on any
+            // failure, or a few failed spawns would permanently shrink the cap.
+            Interlocked.Decrement(ref _reserved);
+            throw;
         }
         return entry;
     }
@@ -71,6 +103,7 @@ public sealed class ConsoleSessionService : IDisposable
     /// RegisterForTest).</summary>
     internal Entry RegisterForTest(IConsoleSession session, TerminalScreen screen)
     {
+        Interlocked.Increment(ref _reserved);
         var entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
         _sessions[entry.Id] = entry;
         return entry;
@@ -87,7 +120,11 @@ public sealed class ConsoleSessionService : IDisposable
     {
         // TryRemove makes exactly one caller win the entry, so Close/Dispose never
         // double-dispose the same session.
-        if (_sessions.TryRemove(id, out var e)) e.Session.Dispose();
+        if (_sessions.TryRemove(id, out var e))
+        {
+            Interlocked.Decrement(ref _reserved);
+            e.Session.Dispose();
+        }
         else throw new KeyNotFoundException($"No console session '{id}'.");
     }
 
@@ -96,7 +133,10 @@ public sealed class ConsoleSessionService : IDisposable
         _disposed = true;
         foreach (var id in _sessions.Keys)
             if (_sessions.TryRemove(id, out var e))
+            {
+                Interlocked.Decrement(ref _reserved);
                 e.Session.Dispose();
+            }
     }
 }
 
@@ -130,6 +170,11 @@ public static class ConsoleTools
         }, PerceptionTools.Json);
     }
 
+    /// <summary>How long a write waits for the child to drain its input before
+    /// giving up (issue #61). Generous for a program that is merely busy, short
+    /// enough that one that never reads cannot hang the MCP request.</summary>
+    internal static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(5);
+
     [McpServerTool(Name = "console_write")]
     [Description("Write text to a console session's stdin. sendEnter appends the Enter key. Send \"\\u0003\" for Ctrl-C.")]
     public static async Task<string> ConsoleWrite(
@@ -145,10 +190,19 @@ public static class ConsoleTools
         CancellationToken ct = default)
     {
         var entry = consoles.Get(sessionId);
-        entry.Session.Write(sendEnter is not false ? text + "\r" : text);
-        AuditLog.Append("console_write", $"{sessionId}: {text}", true, "pty");
+        var wrote = entry.Session.Write(sendEnter is not false ? text + "\r" : text, WriteTimeout);
+        AuditLog.Append("console_write", $"{sessionId}: {text}", wrote, "pty");
         await Task.Delay(250, ct); // give the program a beat to react before the usual read
-        return JsonSerializer.Serialize(new { ok = true, alive = entry.Session.IsAlive }, PerceptionTools.Json);
+        return JsonSerializer.Serialize(new
+        {
+            ok = wrote,
+            alive = entry.Session.IsAlive,
+            // Say WHY, or an agent retries the write that just timed out.
+            note = wrote ? null
+                : "The child is not reading stdin, so the write timed out and may have "
+                  + "landed only partially. Check console_read; it may be a program that "
+                  + "does not take input, or one waiting on something else.",
+        }, PerceptionTools.Json);
     }
 
     [McpServerTool(Name = "console_read")]

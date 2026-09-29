@@ -16,9 +16,16 @@ public class ConsoleWriteTests
     private sealed class FakeSession : IConsoleSession
     {
         public readonly List<string> Writes = [];
+        /// <summary>Simulates a child that has stopped reading stdin (issue #61).</summary>
+        public bool Stuck;
         public string Shell => "fake";
         public bool IsAlive => true;
-        public void Write(string text) => Writes.Add(text);
+        public bool Write(string text, TimeSpan timeout)
+        {
+            if (Stuck) return false;
+            Writes.Add(text);
+            return true;
+        }
         public void Resize(int cols, int rows) { }
         public void Dispose() { }
     }
@@ -73,5 +80,122 @@ public class ConsoleWriteTests
         using var doc = JsonDocument.Parse(json);
         Assert.Equal(TerminalScreen.MaxDimension, doc.RootElement.GetProperty("cols").GetInt32());
         Assert.Equal(TerminalScreen.MaxDimension, doc.RootElement.GetProperty("rows").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_child_that_stopped_reading_is_reported_not_silently_hung()
+    {
+        // Issue #61: an unbounded write used to block the whole MCP request. The
+        // bound turns that into an answer the agent can act on.
+        var (svc, pty, id) = Session();
+        pty.Stuck = true;
+        var json = await ConsoleTools.ConsoleWrite(svc, id, "ls");
+        using var doc = JsonDocument.Parse(json);
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("not reading stdin", doc.RootElement.GetProperty("note").GetString());
+    }
+
+    [Fact]
+    public void Opening_past_the_cap_is_refused_and_says_how_to_recover()
+    {
+        // Issue #62: each session is a live child process; a runaway agent used to
+        // leak them for the life of the server.
+        var svc = new ConsoleSessionService();
+        for (var i = 0; i < ConsoleSessionService.MaxSessions; i++)
+            svc.RegisterForTest(new FakeSession(), new TerminalScreen(80, 24));
+
+        var ex = Assert.Throws<InvalidOperationException>(() => svc.Open("sh", 80, 24));
+        Assert.Contains("console_close", ex.Message);
+        Assert.Contains("console_list", ex.Message);
+    }
+
+    [Fact]
+    public void A_megabyte_paste_to_a_child_that_never_reads_stdin_is_BOUNDED()
+    {
+        // Issue #61's actual contract: a write must never hang the caller. It may
+        // succeed or report false — what it may not do is block indefinitely.
+        //
+        // Asserting a specific outcome would be wrong: whether a stuck child's queue
+        // fills or the tty line discipline discards the overflow is platform
+        // behaviour (macOS drops past MAX_INPUT; Linux fills and blocks). The bound
+        // is the invariant on both. `sleep` never reads stdin.
+        if (OperatingSystem.IsWindows()) return; // ConPTY is gated off (#46/#49)
+
+        using var consoles = new ConsoleSessionService();
+        var entry = consoles.Open("/bin/sh -c 'exec sleep 30'", 80, 24);
+
+        var big = new string('x', 4 * 1024 * 1024); // far past any pty input queue
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        entry.Session.Write(big, TimeSpan.FromSeconds(2));
+        sw.Stop();
+
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(8),
+            $"write took {sw.Elapsed.TotalSeconds:F1}s - the deadline is not being honoured");
+        consoles.Close(entry.Id);
+    }
+
+    [Fact]
+    public void A_write_to_a_child_that_IS_reading_still_succeeds()
+    {
+        // The counterpart: bounding must not break the ordinary path.
+        if (OperatingSystem.IsWindows()) return;
+
+        using var consoles = new ConsoleSessionService();
+        var entry = consoles.Open("/bin/sh", 80, 24);
+        Assert.True(entry.Session.Write("echo ok\r", TimeSpan.FromSeconds(5)));
+        consoles.Close(entry.Id);
+    }
+}
+
+/// <summary>
+/// Issue #62's cap has to hold under concurrency. Counting the dictionary and then
+/// spawning is not a cap: every concurrent caller can see room and every one of
+/// them can take it. This opens far more sessions at once than the cap allows and
+/// asserts the count, which is the only way that distinguishes a claim from a check.
+/// </summary>
+public class ConsoleSessionCapRaceTests
+{
+    [Fact]
+    public void Concurrent_opens_cannot_exceed_the_cap()
+    {
+        if (OperatingSystem.IsWindows()) return; // ConPTY is off by default (#46)
+
+        using var svc = new ConsoleSessionService();
+        var attempts = ConsoleSessionService.MaxSessions * 3;
+        var opened = 0;
+        var refused = 0;
+
+        Parallel.For(0, attempts, _ =>
+        {
+            try
+            {
+                svc.Open("/bin/sh", 40, 10);
+                Interlocked.Increment(ref opened);
+            }
+            catch (InvalidOperationException)
+            {
+                Interlocked.Increment(ref refused);
+            }
+        });
+
+        Assert.Equal(ConsoleSessionService.MaxSessions, opened);
+        Assert.Equal(attempts - ConsoleSessionService.MaxSessions, refused);
+        Assert.Equal(ConsoleSessionService.MaxSessions, svc.List().Count);
+    }
+
+    [Fact]
+    public void Closing_a_session_gives_its_slot_back()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        using var svc = new ConsoleSessionService();
+        var ids = new List<string>();
+        for (var i = 0; i < ConsoleSessionService.MaxSessions; i++) ids.Add(svc.Open("/bin/sh", 40, 10).Id);
+        Assert.Throws<InvalidOperationException>(() => svc.Open("/bin/sh", 40, 10));
+
+        svc.Close(ids[0]);
+        var replacement = svc.Open("/bin/sh", 40, 10);   // the freed slot is reusable
+        Assert.NotNull(replacement);
+        Assert.Throws<InvalidOperationException>(() => svc.Open("/bin/sh", 40, 10));
     }
 }
