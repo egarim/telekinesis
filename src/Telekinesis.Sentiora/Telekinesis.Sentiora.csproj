@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Telekinesis.Sentiora</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The adapter's surface stays internal: Telekinesis.Cli reaches the backend
+         through SentioraBackend, and the tests reach the transport seam directly. -->
+    <InternalsVisibleTo Include="Telekinesis.Cli" />
+    <InternalsVisibleTo Include="Telekinesis.Cli.Tests" />
+  </ItemGroup>
+
+  <!-- Issue #67: the coupling to Sentiora Terminal is a JSON-RPC contract over
+       stdio plus a DISCOVERED executable. There is deliberately no PackageReference
+       or ProjectReference to anything from egarim/sentiora-terminal here, so this
+       assembly builds, and Telekinesis runs, with Sentiora entirely absent. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Telekinesis.Abstractions\Telekinesis.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

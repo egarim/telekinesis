@@ -48,6 +48,10 @@
     <ProjectReference Include="..\Telekinesis.Medium\Telekinesis.Medium.csproj" />
     <ProjectReference Include="..\Telekinesis.Vision\Telekinesis.Vision.csproj" />
     <ProjectReference Include="..\Telekinesis.Pilot\Telekinesis.Pilot.csproj" />
+    <!-- Issue #67: the Sentiora console backend. Unconditional — it is a discovered
+         out-of-process runtime reached over stdio, not a platform-specific assembly,
+         and Telekinesis must build and run with Sentiora entirely absent. -->
+    <ProjectReference Include="..\Telekinesis.Sentiora\Telekinesis.Sentiora.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="$(TargetFramework.Contains('-windows'))">
