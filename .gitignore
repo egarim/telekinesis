@@ -5,6 +5,7 @@ obj/
 *.db
 *.db-shm
 *.db-wal
+TestResults/
 
 # flick / remotion
 flick-output/remotion/node_modules/
