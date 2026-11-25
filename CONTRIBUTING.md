@@ -30,40 +30,62 @@ Signatures are stored on the orphan branch
 `.github/cla-signatures.json` — deliberately not on `main`, so signature history never
 mixes with code history.
 
-`contributor-assistant/github-action` reads that file but **never creates the branch**. If it
-goes missing, every check that actually inspects signatures — a PR opened, a commit pushed to
-one, or a `recheck` comment — fails while setting up storage. Excerpt from a real failure:
+`contributor-assistant/github-action` reads *and writes* that file but **never creates the
+branch**. While it was missing, every run that inspects signatures — a PR opened, a commit pushed
+to one, or a `recheck` comment — logged this and then failed the check. Excerpt from
+[run 45561034216](https://github.com/egarim/telekinesis/actions/runs/45561034216):
 
 > Error occurred when creating the signed contributors file: Branch cla-signatures not found.
 > Make sure the branch where signatures are stored is NOT protected.
 
-The run then fails with `Committers of pull request N have to sign the CLA`. Being allowlisted
-does not save you: #63, #64 and #66 each had `cla` = FAILURE while every one of their commits
-was authored by `egarim`, who is on the `allowlist`. Restoring the branch, not the committer
-list, is what turns the check green.
+followed by `Committers of pull request N have to sign the CLA`.
 
-Runs for a `pull_request_target: closed` event stay green, because they only lock the
-already-merged PR and never read the file. That is what made this outage look intermittent
+Being on `allowlist` did not help. Every commit on the then-open PRs #63, #64 and #66 resolves to
+a linked `egarim` account — verified with
+`gh api repos/egarim/telekinesis/pulls/<n>/commits`, which reported `"author": {"login":
+"egarim"}` for all of them (`34e8975`, `ef0899b`, `b9f0888`; `68b1e1e`, `3bb5a1e`; `7069ed6`,
+`63d03cd`, `5ad2506`, `89c87ee`, `3456583`, `580ed84`) — and all three still carried `cla` =
+FAILURE, from 2026-09-23 and 2026-09-29.
+
+Runs for a `pull_request_target: closed` event stayed green throughout, because they only lock
+the already-merged PR and never touch the file. That is what made this outage look intermittent
 rather than total.
 
+What the action does *internally* between resolving the allowlist and reading the file is
+deliberately not documented here. Three attempts to state it produced three different answers,
+and none is verifiable from this repository; only the observable behaviour above is
+evidence-backed. Do not infer the ordering from this text.
+
 To restore it, create an **orphan** branch named `cla-signatures` containing one file at
-`.github/cla-signatures.json`, holding a JSON object with an empty `signedContributors` array.
-Leave the branch **unprotected**: the action pushes signature commits to it with
-`GITHUB_TOKEN`, under this workflow's `contents: write` permission.
+`.github/cla-signatures.json`, holding a JSON object with an empty `signedContributors` array —
+**unless signatures already exist**, in which case restore the previous array instead. Recreating
+the branch empty discards every recorded signature and puts each past signer back in the red
+until they sign again. Leave the branch **unprotected**: the action pushes signature commits to it
+with `GITHUB_TOKEN`, under this workflow's `contents: write` permission.
 
-To verify, open a PR (or push a commit to one) and read the `cla` job log: it must **not**
-contain `Error occurred when creating the signed contributors file`. Check the log rather than
-trusting the colour of the check, because a second and unrelated cause of a red `cla` exists in
-this repository's history — a commit whose author email is not linked to any GitHub account,
-which the bot reports as *"… seems not to be a GitHub user"* and which restoring the branch
-cannot fix. Several commits on the PR #70 branch were authored that way, by a machine whose
-global git identity was still the `Your Name` placeholder.
+Verify **both** halves, because they fail in different ways and the read path alone can pass on a
+repository that is still broken:
 
-Do **not** verify with `recheck` on an old PR: it refreshes the PR's status by asking GitHub to
-re-run the *original* run, which GitHub refuses past 30 days
-(`Unable to retry this workflow run because it was created over a month ago`). The recheck
-itself still succeeds and logs `All contributors have signed the CLA`, but the stale red check
-survives it — only a new commit on that PR branch clears it.
+1. *Read path.* Open a PR, or push a commit to one, and read the `cla` job log: it must no longer
+   contain `Error occurred when creating the signed contributors file`. Go by the log, not by the
+   colour of the check — a red `cla` has a second, unrelated cause in this repository's history: a
+   commit whose author email is not linked to any GitHub account, which the bot reports as
+   *"… seems not to be a GitHub user"* and which restoring the branch cannot fix. Three commits on
+   the PR #70 branch (`5f3d697`, `a3785cb`, `ca14eed`) were authored that way, by a machine whose
+   global git identity was still the `Your Name` placeholder.
+2. *Write path.* A **protected** branch that already contains the file passes step 1 and still
+   rejects the first real signature, so confirm it is unprotected:
+   `gh api repos/egarim/telekinesis/branches/cla-signatures/protection` must return **404
+   "Branch not protected"**. Stronger evidence is a signature commit actually landing on the
+   branch from a non-allowlisted signer; as of 2026-11-25 none has been observed since the branch
+   was restored, so that path is **unverified**.
+
+`recheck` is usable as a *detector* — its job log shows whether signature storage could be read —
+but not as a *verdict* on an old PR. It refreshes the PR's status by asking GitHub to re-run the
+*original* run, which GitHub refuses past 30 days (`Unable to retry this workflow run because it
+was created over a month ago`). The recheck job itself succeeds and logs `All contributors have
+signed the CLA`, yet the stale red check on the PR survives it; only a new commit on that PR
+branch clears it.
 
 ## Development
 

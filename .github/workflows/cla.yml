@@ -23,22 +23,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           # Signature storage lives on the orphan branch named by `branch:` below,
-          # NOT on main. The action reads that file but never creates the branch, so
-          # if it goes missing every run that inspects signatures dies while setting
-          # up storage -- excerpt from a real failure:
+          # NOT on main. The action reads *and writes* that file but never creates
+          # the branch, so while it is missing every run that inspects signatures
+          # fails -- excerpt from run 45561034216:
           #   "Error occurred when creating the signed contributors file: Branch
           #    cla-signatures not found. Make sure the branch where signatures are
           #    stored is NOT protected."
-          # and then fails the check with "Committers of pull request N have to sign
-          # the CLA". Being on `allowlist` does not save you: PRs #63, #64 and #66
-          # all failed while every commit was authored by an allowlisted, linked
-          # account. Runs for a `closed` event stay green because they only lock the
-          # merged PR and never read the file, which is what made the outage look
-          # intermittent rather than total.
-          # The branch must exist, must contain this file (a JSON object with an
-          # empty signedContributors array), and must stay unprotected because the
-          # action commits signature updates to it with GITHUB_TOKEN under this
-          # workflow's `contents: write`. See CONTRIBUTING.md.
+          # followed by "Committers of pull request N have to sign the CLA". Being on
+          # `allowlist` did not help: PRs #63, #64 and #66 all failed while every one
+          # of their commits resolved to a linked `egarim` account. Runs for a
+          # `closed` event stayed green because they only lock the merged PR and never
+          # touch the file, which made the outage look intermittent rather than total.
+          # The branch must exist, must contain this file (a JSON object with a
+          # signedContributors array -- restore the previous array rather than an
+          # empty one, or every past signer goes back to red), and must stay
+          # UNPROTECTED: the action commits signature updates to it with GITHUB_TOKEN
+          # under this workflow's `contents: write`, and a protected branch passes a
+          # read-path check while still rejecting the first real signature.
+          # `gh api repos/:owner/:repo/branches/cla-signatures/protection` must 404.
+          # Restore and verify both paths per CONTRIBUTING.md.
           path-to-signatures: '.github/cla-signatures.json'
           path-to-document: 'https://github.com/egarim/telekinesis/blob/main/CLA.md'
           branch: 'cla-signatures'
