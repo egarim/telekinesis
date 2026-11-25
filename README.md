@@ -79,8 +79,10 @@ MCP client config:
   full TUI reads the way a human sees it, not as a stream of escape bytes. The
   working directory, the environment, an ssh hop and a half-typed REPL expression all
   survive between calls. Action tier, audit-logged; Linux/macOS supported, Windows
-  behind `TELEKINESIS_CONPTY=1` until the ConPTY child-attach bug clears.
-  See [docs/CONSOLE.md](docs/CONSOLE.md).
+  behind `TELEKINESIS_CONPTY=1` until the ConPTY child-attach bug clears — or behind
+  `TELEKINESIS_SENTIORA=1`, which routes the PTY through an out-of-process
+  [Sentiora Terminal](https://github.com/egarim/sentiora-terminal) host and works on
+  that same Windows build today. See [docs/CONSOLE.md](docs/CONSOLE.md).
 - **X-ray overlay** — see what the AI sees, on the real desktop: `highlight` boxes an
   element, `probe --overlay` draws live labeled boxes over a whole app, and
   `TELEKINESIS_SHOW_INTENT=1` makes every injected action flash its target before the
