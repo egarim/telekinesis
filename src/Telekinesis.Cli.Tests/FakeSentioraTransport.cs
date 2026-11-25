@@ -64,6 +64,47 @@ internal sealed class FakeSentioraTransport : ISentioraTransport
     /// prove an ownership failure is surfaced loudly and NOT retried.</summary>
     public bool RejectOwner { get; set; }
 
+    /// <summary>terminal.create replies with something that is not an object, so
+    /// SentioraObservation.From throws — the path that used to leak the reservation.</summary>
+    public bool MalformedCreateResult { get; set; }
+
+    /// <summary>terminal.create replies with a well-formed observation but no owner
+    /// token, so the session cannot be driven and must be rolled back.</summary>
+    public bool CreateResultWithoutOwner { get; set; }
+
+    /// <summary>terminal.create fails at the transport level, where the adapter cannot
+    /// tell whether the runtime registered the session.</summary>
+    public bool FailCreateWithTransportError { get; set; }
+
+    /// <summary>Make terminal.wait fail with this runtime message, to exercise the poll
+    /// loop's error paths.</summary>
+    public string? FailWaitWith { get; set; }
+
+    /// <summary>Scripted terminal.wait responses, dequeued ahead of the live
+    /// observation. Lets a test deliver observations OUT OF ORDER, which the real
+    /// transport permits because it correlates by id and the runtime dispatches each
+    /// stdin line concurrently.</summary>
+    public Queue<JsonNode> ScriptedWaits { get; } = new();
+
+    /// <summary>Build an observation object the way the runtime would.</summary>
+    public static JsonNode MakeObservation(
+        string sessionId, string state, long revision, int cols = 80, int rows = 24, string screen = "") =>
+        new JsonObject
+        {
+            ["sessionId"] = sessionId,
+            ["pid"] = 4242,
+            ["state"] = state,
+            ["revision"] = revision,
+            ["running"] = state is "spawned" or "operational",
+            ["exit"] = null,
+            ["cols"] = cols,
+            ["rows"] = rows,
+            ["writeErrors"] = 0,
+            ["cursor"] = new JsonObject { ["x"] = 0, ["y"] = 0 },
+            ["screen"] = screen,
+            ["idleMilliseconds"] = 0,
+        };
+
     public bool IsBroken => _broken;
     public string? BrokenReason => _broken ? "the fake transport was broken on purpose" : null;
 
@@ -88,7 +129,14 @@ internal sealed class FakeSentioraTransport : ISentioraTransport
         if (fake.State == "spawned") fake.State = "operational";
     }
 
-    public void SetState(string state, string? sessionId = null) => Resolve(sessionId).State = state;
+    /// <summary>Set the reported state, optionally pinning the revision — a test needs
+    /// both to place an observation ahead of or behind the adapter's cached one.</summary>
+    public void SetState(string state, long? revision = null, string? sessionId = null)
+    {
+        var fake = Resolve(sessionId);
+        fake.State = state;
+        if (revision is not null) fake.Revision = revision.Value;
+    }
 
     public string ScreenOf(string? sessionId = null) => Resolve(sessionId).Screen;
 
@@ -137,6 +185,15 @@ internal sealed class FakeSentioraTransport : ISentioraTransport
                 var fake = new Fake(Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), cols, rows,
                     InitialScreen ?? string.Join('\n', Enumerable.Repeat(string.Empty, rows)));
                 _sessions[fake.Id] = fake;
+
+                // The three failure knobs below all fire AFTER the session is registered,
+                // because that is the dangerous case: the runtime is now holding a live
+                // session and a leaked descriptor, and the adapter has to account for it.
+                if (FailCreateWithTransportError)
+                    throw new SentioraTransportException("the fake transport failed during terminal.create");
+                if (MalformedCreateResult) return new JsonArray(); // not an object: the owner guard must catch it
+                if (CreateResultWithoutOwner) return Observe(fake);
+
                 var observation = Observe(fake);
                 observation["owner"] = fake.Owner;
                 return observation;
@@ -176,6 +233,11 @@ internal sealed class FakeSentioraTransport : ISentioraTransport
             {
                 var fake = Resolve(Str(parameters, "sessionId"));
                 await _waitGate.WaitAsync(ct).ConfigureAwait(false);
+                if (FailWaitWith is not null) throw SentioraErrors.ToException(FailWaitWith);
+                // A scripted response is delivered instead of the live state, which is how
+                // a test produces an observation older than one already applied.
+                lock (ScriptedWaits)
+                    if (ScriptedWaits.Count > 0) return ScriptedWaits.Dequeue();
                 return Observe(fake);
             }
 

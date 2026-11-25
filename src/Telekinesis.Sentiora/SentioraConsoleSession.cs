@@ -130,26 +130,87 @@ public sealed class SentioraConsoleSession : IConsoleSession, IConsoleSessionGeo
                 "The Sentiora console backend has no room for another session on this host process.",
                 "Session limit") { ErrorCode = -32000 };
 
-        JsonNode? result;
+        // Everything past the reservation must either return a live session that owns
+        // it, or roll it back. A leaked reservation is the failure this design tolerates
+        // least: _live stays inflated, so the host eventually refuses every new session
+        // with "Session limit" while the runtime has none open, and _creates stays
+        // inflated so the host retires early — which quietly undermines the recycling
+        // that is our only defence against the runtime's ~500-cycle ceiling.
+        //
+        // Two distinct rollbacks, because they mean different things to the counters:
+        //   UnreserveSession() — nothing was created, so give back the slot AND the
+        //                        create cycle.
+        //   ReleaseSession()   — the runtime DID create a session (or we cannot tell),
+        //                        so the descriptor leak happened and the cycle must
+        //                        still count; only the slot comes back.
+        string? createdId = null;
+        string? owner = null;
+        SentioraObservation initial;
         try
         {
-            result = await host.RequestAsync("terminal.create", parameters, ct).ConfigureAwait(false);
+            var result = await host.RequestAsync("terminal.create", parameters, ct).ConfigureAwait(false);
+
+            // The owner check comes BEFORE decoding the observation: From() throws for a
+            // non-object result, so checking it second would make this guard unreachable
+            // on exactly the malformed response it exists to catch.
+            if (result is not JsonObject created ||
+                created["owner"] is not JsonValue ownerValue || !ownerValue.TryGetValue<string>(out owner))
+                throw new SentioraTransportException(
+                    "The Sentiora runtime returned no owner token for the new session.");
+
+            initial = SentioraObservation.From(result);
+            createdId = initial.SessionId;
         }
-        catch
+        catch (SentioraProtocolException)
         {
+            // The runtime rejected the create — bad command, bad dimensions, or its own
+            // session cap — and server.js throws before registering anything, so no
+            // session exists and no descriptor leaked.
             host.UnreserveSession();
             throw;
         }
-
-        var initial = SentioraObservation.From(result);
-        if (result is not JsonObject o ||
-            o["owner"] is not JsonValue ownerValue || !ownerValue.TryGetValue<string>(out var owner))
+        catch
         {
-            host.UnreserveSession();
-            throw new SentioraTransportException("The Sentiora runtime returned no owner token for the new session.");
+            // A transport failure or a malformed result: we cannot tell whether the
+            // runtime registered the session, and with no owner token we cannot close it.
+            // Count the cycle, which is conservative — it only retires the host sooner.
+            host.ReleaseSession();
+            throw;
         }
 
-        return new SentioraConsoleSession(host, shell, initial.SessionId, owner, initial, onOutput);
+        try
+        {
+            return new SentioraConsoleSession(host, shell, createdId, owner, initial, onOutput);
+        }
+        catch
+        {
+            // The constructor paints the initial screen through the caller's callback,
+            // which can throw. By now the runtime session exists, so it must be closed
+            // as well as released — otherwise it stays open inside the runtime with
+            // nobody holding its owner token, invisible to console_list and unreachable.
+            await TryCloseRuntimeSessionAsync(host, createdId, owner).ConfigureAwait(false);
+            host.ReleaseSession();
+            throw;
+        }
+    }
+
+    /// <summary>Best-effort close of a runtime session we created but cannot hand back.
+    /// Never throws: the caller is already unwinding a failure.</summary>
+    private static async Task TryCloseRuntimeSessionAsync(SentioraHost host, string? sessionId, string? owner)
+    {
+        if (sessionId is null || owner is null || host.IsBroken) return;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await host.RequestAsync("terminal.close",
+                new JsonObject { ["sessionId"] = sessionId, ["owner"] = owner }, cts.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Nothing more to do. The host is reaped when it retires or when the
+            // backend is disposed, and either path closes stdin, which makes the
+            // runtime reap everything it still holds.
+        }
     }
 
     public void Write(string text) => WriteAsync(text).GetAwaiter().GetResult();
@@ -267,69 +328,82 @@ public sealed class SentioraConsoleSession : IConsoleSession, IConsoleSessionGeo
 
     /// <summary>Background wait loop. Polls rather than blocking indefinitely because
     /// the protocol has no cancellation primitive: an in-flight terminal.wait cannot
-    /// be aborted, it completes or times out, so the timeout IS the shutdown latency.</summary>
+    /// be aborted, it completes or times out, so the timeout IS the shutdown latency.
+    ///
+    /// Every way out of this loop goes through <see cref="StopObserving"/>, because an
+    /// observer that has stopped must NOT leave the session reporting IsAlive == true:
+    /// the screen would freeze while callers kept believing the child was running,
+    /// which is worse than an error. The try wraps the whole cycle, not just the
+    /// request — Apply paints through the caller-supplied output callback, and a throw
+    /// from there would otherwise fault this task with nobody awaiting it.</summary>
     private async Task PollAsync()
     {
         var ct = _pollCancellation.Token;
         while (!ct.IsCancellationRequested)
         {
-            SentioraObservation observation;
             try
             {
-                var result = await _host.RequestAsync("terminal.wait", new JsonObject
-                {
-                    ["sessionId"] = RuntimeSessionId,
-                    ["afterRevision"] = Revision,
-                    ["timeoutMs"] = PollTimeoutMs,
-                }, ct).ConfigureAwait(false);
-                observation = SentioraObservation.From(result);
+                if (!await PollOnceAsync(ct).ConfigureAwait(false)) return;
             }
             catch (OperationCanceledException)
             {
-                return;
+                return; // teardown; nothing to report
             }
             catch (SentioraProtocolException ex) when (ex.Kind == SentioraErrorKind.UnknownSession)
             {
                 // The host restarted, or the session was released underneath us. Every
-                // id we hold is now meaningless; surface it as "backend lost" rather
+                // id we hold is now meaningless; report it as "backend lost" rather
                 // than retrying against a runtime that will keep saying no.
-                _backendLost = true;
-                lock (_gate) _state = "released";
+                StopObserving(backendLost: true, "released");
                 return;
             }
-            catch (SentioraProtocolException)
+            catch (SentioraProtocolException ex)
             {
-                return;
-            }
-            catch (SentioraTransportException)
-            {
-                _backendLost = true;
-                lock (_gate) _state = "exited";
+                // "Session not running" means the child really is gone, so the backend
+                // itself is fine; any other protocol failure means we can no longer
+                // trust this session, so it is marked lost as well.
+                StopObserving(ex.Kind != SentioraErrorKind.SessionNotRunning, "exited");
                 return;
             }
             catch (Exception)
             {
-                // This loop is a background observer with nobody awaiting it, so an
-                // unexpected exception would otherwise surface as an unobserved task
-                // fault and leave a session that silently stopped updating. The honest
-                // state after the observer dies is "no longer observable".
-                _backendLost = true;
-                lock (_gate) _state = "exited";
-                return;
-            }
-
-            Apply(observation);
-
-            if (observation.State is "exited" or "released")
-            {
-                // Docs promise the final screen stays readable after the child exits.
-                // Give the emulator one more beat to flush trailing output, then take
-                // a last observation and stop — an exited session makes terminal.wait
-                // return immediately, which would otherwise spin.
-                await CaptureFinalScreenAsync().ConfigureAwait(false);
+                // Covers the transport dying, a malformed observation, and a throwing
+                // output callback. The honest state after the observer dies is
+                // "no longer observable".
+                StopObserving(backendLost: true, "exited");
                 return;
             }
         }
+    }
+
+    /// <summary>One wait-and-apply cycle. Returns false when the session has exited and
+    /// the loop should stop.</summary>
+    private async Task<bool> PollOnceAsync(CancellationToken ct)
+    {
+        var result = await _host.RequestAsync("terminal.wait", new JsonObject
+        {
+            ["sessionId"] = RuntimeSessionId,
+            ["afterRevision"] = Revision,
+            ["timeoutMs"] = PollTimeoutMs,
+        }, ct).ConfigureAwait(false);
+        var observation = SentioraObservation.From(result);
+
+        Apply(observation);
+
+        if (observation.State is not ("exited" or "released")) return true;
+
+        // Docs promise the final screen stays readable after the child exits. Give the
+        // emulator one more beat to flush trailing output, then take a last observation
+        // and stop — an exited session makes terminal.wait return immediately, which
+        // would otherwise spin.
+        await CaptureFinalScreenAsync().ConfigureAwait(false);
+        return false;
+    }
+
+    private void StopObserving(bool backendLost, string state)
+    {
+        _backendLost = backendLost;
+        lock (_gate) _state = state;
     }
 
     private async Task CaptureFinalScreenAsync()
@@ -356,9 +430,17 @@ public sealed class SentioraConsoleSession : IConsoleSession, IConsoleSessionGeo
     {
         lock (_gate)
         {
-            // Revisions only move forward; a response that arrives after a newer one
-            // must not drag the cached value back and re-trigger "Stale observation".
-            if (observation.Revision > _revision) _revision = observation.Revision;
+            // Revisions only move forward, and a stale observation is dropped WHOLE —
+            // not just its revision. The transport correlates responses by id and
+            // permits several requests in flight, and Sentiora's server dispatches each
+            // stdin line concurrently, so an older observation can land after a newer
+            // one. Applying it would drag _revision back (re-triggering "Stale
+            // observation" on the next write) and, worse, could flip `exited` back to
+            // `operational` — reporting a dead child as alive. An equal revision is
+            // still applied: the screen can change without one, and Paint dedupes.
+            if (observation.Revision < _revision) return;
+
+            _revision = observation.Revision;
             _state = observation.State;
             if (observation.Cols > 0) _appliedCols = observation.Cols;
             if (observation.Rows > 0) _appliedRows = observation.Rows;
@@ -384,11 +466,16 @@ public sealed class SentioraConsoleSession : IConsoleSession, IConsoleSessionGeo
         lock (_gate)
         {
             if (screen == _lastPainted) return;
-            _lastPainted = screen;
         }
         var payload = "\x1b[2J\x1b[H" + screen.Replace("\n", "\r\n");
         var bytes = Encoding.UTF8.GetBytes(payload);
         _onOutput(bytes, bytes.Length);
+        // Committed only AFTER the callback returned. Committing first would mean a
+        // callback that throws loses that screen permanently: the next observation of
+        // the same content would compare equal and be skipped, so the grid would never
+        // catch up. Worst case now, if two Paints race, is one redundant repaint —
+        // clear-and-repaint is idempotent.
+        lock (_gate) _lastPainted = screen;
     }
 
     public void Dispose()

@@ -20,9 +20,35 @@ public sealed class ConsoleSessionService : IDisposable
     private int _next;
     private volatile bool _disposed;
 
-    /// <summary>Lazily created, and only when TELEKINESIS_SENTIORA=1, so a Telekinesis
-    /// that never opts in never spawns a Node process (issue #67).</summary>
-    private SentioraBackend? _sentiora;
+    /// <summary>Test seam: replaces the backend factory. Must be set before the first
+    /// Open(), because the Lazy below captures whichever factory is current on its
+    /// first access.</summary>
+    private volatile Func<SentioraBackend>? _sentioraFactory;
+
+    /// <summary>The Sentiora backend, created on first use and only when
+    /// TELEKINESIS_SENTIORA=1, so a Telekinesis that never opts in never spawns a Node
+    /// process (issue #67).
+    ///
+    /// Lazy with ExecutionAndPublication rather than `_sentiora ??= new()`: every other
+    /// part of Open() is built for concurrent callers — _sessions is a
+    /// ConcurrentDictionary, ids come from Interlocked.Increment, and Register() guards
+    /// a Dispose() race. An unsynchronised read-modify-write here would let two
+    /// concurrent console_open calls each construct a backend; one assignment then
+    /// overwrites the other, Dispose() sees only the survivor, and if the discarded
+    /// instance had already reached OpenAsync and started a host, that Node process is
+    /// orphaned with nothing left holding a reference to it.</summary>
+    private readonly Lazy<SentioraBackend> _sentiora;
+
+    public ConsoleSessionService()
+    {
+        _sentiora = new Lazy<SentioraBackend>(() =>
+        {
+            // Read the seam once: it is volatile, and reading it twice could see the
+            // test factory on one read and null on the other.
+            var factory = _sentioraFactory;
+            return factory is not null ? factory() : new SentioraBackend();
+        }, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
 
     public Entry Open(string? shell, int cols, int rows)
     {
@@ -48,7 +74,7 @@ public sealed class ConsoleSessionService : IDisposable
             var sentioraScreen = new TerminalScreen(cols, rows);
             try
             {
-                var sentioraSession = (_sentiora ??= new SentioraBackend()).Open(shell, cols, rows, sentioraScreen.Feed);
+                var sentioraSession = _sentiora.Value.Open(shell, cols, rows, sentioraScreen.Feed);
                 // The runtime clamps harder than Telekinesis does (cols 2-300, rows
                 // 2-150 vs 2-1000), so the grid must be told the size the PTY actually
                 // got — otherwise console_open reports dimensions the child never had.
@@ -118,9 +144,14 @@ public sealed class ConsoleSessionService : IDisposable
     }
 
     /// <summary>Seam for tests: install a Sentiora backend instead of letting Open()
-    /// build one from discovery (issue #67). TELEKINESIS_SENTIORA=1 must still be set,
-    /// so the gate itself is exercised too.</summary>
-    internal void UseSentioraBackendForTest(SentioraBackend backend) => _sentiora = backend;
+    /// build one from discovery (issue #67). Must be called before the first Open().
+    /// TELEKINESIS_SENTIORA=1 must still be set, so the gate itself is exercised too.</summary>
+    internal void UseSentioraBackendForTest(SentioraBackend backend) => _sentioraFactory = () => backend;
+
+    /// <summary>Seam for tests: replace how the backend is constructed, so a test can
+    /// count constructions and prove the lazy init is atomic. Must be called before the
+    /// first Open().</summary>
+    internal void UseSentioraFactoryForTest(Func<SentioraBackend> factory) => _sentioraFactory = factory;
 
     public Entry Get(string id) =>
         _sessions.TryGetValue(id, out var e)
@@ -144,8 +175,9 @@ public sealed class ConsoleSessionService : IDisposable
             if (_sessions.TryRemove(id, out var e))
                 e.Session.Dispose();
         // After the sessions, so no session tries to reach a host that is already gone.
-        _sentiora?.Dispose();
-        _sentiora = null;
+        // IsValueCreated first: disposing must not CONSTRUCT a backend that was never
+        // used, which is what an unconditional _sentiora.Value would do.
+        if (_sentiora.IsValueCreated) _sentiora.Value.Dispose();
     }
 }
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -360,6 +361,96 @@ public class SentioraAdapterTests
         Assert.Equal(1, harness.First.Calls.Count(c => c == "terminal.close"));
     }
 
+    // ---- the observer must never leave a session silently stale ----
+
+    [Fact]
+    public async Task A_dead_child_stops_the_session_reporting_alive_instead_of_freezing_silently()
+    {
+        using var harness = new SentioraHarness();
+        var (session, _) = await OpenAsync(harness);
+        using (session)
+        {
+            Assert.True(session.IsAlive);
+
+            // The poll loop used to `return` here without touching _state or _backendLost,
+            // so the session kept reporting IsAlive == true over a screen that would never
+            // update again. A silent stale session is worse than an error.
+            harness.First.FailWaitWith = "Session not running";
+            harness.First.ReleaseWait();
+
+            await Eventually(() => !session.IsAlive);
+            Assert.Equal("exited", session.StateForTest);
+            // The child really is gone, so the backend is fine — do not mark it lost.
+            Assert.False(session.BackendLost);
+        }
+    }
+
+    [Fact]
+    public async Task An_unrecognised_protocol_failure_in_the_poll_loop_marks_the_backend_lost()
+    {
+        using var harness = new SentioraHarness();
+        var (session, _) = await OpenAsync(harness);
+        using (session)
+        {
+            harness.First.FailWaitWith = "Invalid wait"; // not "the child died"
+            harness.First.ReleaseWait();
+
+            await Eventually(() => session.BackendLost);
+            Assert.False(session.IsAlive);
+            Assert.Equal("exited", session.StateForTest);
+        }
+    }
+
+    [Fact]
+    public async Task A_throwing_output_callback_stops_the_observer_instead_of_faulting_it_silently()
+    {
+        using var harness = new SentioraHarness();
+        var paints = 0;
+        // The constructor's first paint succeeds; the next one throws from inside Apply,
+        // which used to sit OUTSIDE the poll loop's try and fault the task with nobody
+        // awaiting it — leaving IsAlive true over a frozen screen.
+        var session = await harness.Backend.OpenAsync("cmd.exe", 80, 24,
+            (_, _) => { if (Interlocked.Increment(ref paints) >= 2) throw new InvalidOperationException("sink"); });
+        using (session)
+        {
+            harness.First.SetScreen("changed");
+            harness.First.ReleaseWait();
+
+            await Eventually(() => session.BackendLost);
+            Assert.False(session.IsAlive);
+        }
+    }
+
+    [Fact]
+    public async Task An_older_observation_cannot_flip_an_exited_session_back_to_alive()
+    {
+        using var harness = new SentioraHarness();
+        var (session, painted) = await OpenAsync(harness);
+        using (session)
+        {
+            // Take the session to exited at revision 9 via resize, which applies the
+            // runtime's reply directly and leaves the poll loop parked — so the loop is
+            // still alive to be handed something older.
+            harness.First.SetState("exited", revision: 9);
+            await session.ResizeAsync(100, 30);
+            Assert.False(session.IsAlive);
+
+            // The transport correlates by id and permits several requests in flight, and
+            // Sentiora dispatches each stdin line concurrently, so an older observation
+            // really can land last. Apply used to guard only _revision against regression
+            // and wrote _state unconditionally, resurrecting the dead child.
+            harness.First.ScriptedWaits.Enqueue(FakeSentioraTransport.MakeObservation(
+                session.RuntimeSessionId, "operational", 4, screen: "STALE-SCREEN"));
+            harness.First.ReleaseWait();
+            await Task.Delay(400);
+
+            Assert.Equal("exited", session.StateForTest);
+            Assert.False(session.IsAlive);
+            // Dropped WHOLE, not just its revision: the stale screen is never painted.
+            lock (painted) Assert.DoesNotContain(painted, p => p.Contains("STALE-SCREEN"));
+        }
+    }
+
     // ---- the Telekinesis-level surface: ids and reported geometry ----
 
     private static (ConsoleSessionService Service, SentioraHarness Harness) ServiceWithSentiora()
@@ -443,6 +534,90 @@ public class SentioraAdapterTests
         {
             service.Dispose();
             harness.Dispose();
+            Environment.SetEnvironmentVariable(SentioraDiscovery.EnableVariable, null);
+        }
+    }
+
+    [Fact]
+    public async Task Concurrent_console_opens_construct_exactly_one_backend()
+    {
+        Environment.SetEnvironmentVariable(SentioraDiscovery.EnableVariable, "1");
+        var constructed = 0;
+        var transports = new List<FakeSentioraTransport>();
+        try
+        {
+            using var service = new ConsoleSessionService();
+            service.UseSentioraFactoryForTest(() =>
+            {
+                Interlocked.Increment(ref constructed);
+                // Widen the race window on purpose: with an unsynchronised
+                // `_sentiora ??= new SentioraBackend()` this is exactly where a second
+                // caller would slip in and construct its own.
+                Thread.Sleep(25);
+                return new SentioraBackend(
+                    resolve: () => new SentioraLaunchSpec("fake-runtime", [], "test"),
+                    transportFactory: _ =>
+                    {
+                        var transport = new FakeSentioraTransport();
+                        lock (transports) transports.Add(transport);
+                        return transport;
+                    },
+                    maxSessionsPerHost: 1000, // one host, so transport count == backend count
+                    announce: _ => { });
+            });
+
+            const int callers = 16;
+            var opened = new ConcurrentBag<ConsoleSessionService.Entry>();
+            // A TCS gate rather than a Barrier: awaiting it releases the thread, so a
+            // thread pool smaller than `callers` cannot deadlock the test.
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var tasks = Enumerable.Range(0, callers)
+                .Select(_ => Task.Run(async () =>
+                {
+                    await gate.Task;
+                    opened.Add(service.Open("cmd.exe", 80, 24));
+                }))
+                .ToArray();
+            gate.SetResult();
+            await Task.WhenAll(tasks);
+
+            Assert.Equal(callers, opened.Count);
+            // The loser of a `_sentiora ??=` race is overwritten and Dispose() never sees
+            // it, so if it had already started a host that Node process is orphaned with
+            // nothing holding a reference. One backend, one host, one process.
+            Assert.Equal(1, constructed);
+            Assert.Single(transports);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(SentioraDiscovery.EnableVariable, null);
+        }
+    }
+
+    [Fact]
+    public void Disposing_a_service_that_never_opened_a_session_does_not_construct_a_backend()
+    {
+        Environment.SetEnvironmentVariable(SentioraDiscovery.EnableVariable, "1");
+        var constructed = 0;
+        try
+        {
+            var service = new ConsoleSessionService();
+            service.UseSentioraFactoryForTest(() =>
+            {
+                Interlocked.Increment(ref constructed);
+                return new SentioraBackend(
+                    resolve: () => new SentioraLaunchSpec("fake-runtime", [], "test"),
+                    transportFactory: _ => new FakeSentioraTransport(),
+                    announce: _ => { });
+            });
+
+            // Dispose checks IsValueCreated: an unconditional .Value would construct a
+            // backend purely to dispose it, spawning a runtime nobody asked for.
+            service.Dispose();
+            Assert.Equal(0, constructed);
+        }
+        finally
+        {
             Environment.SetEnvironmentVariable(SentioraDiscovery.EnableVariable, null);
         }
     }

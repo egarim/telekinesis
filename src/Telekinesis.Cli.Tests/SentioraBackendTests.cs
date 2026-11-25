@@ -139,7 +139,7 @@ public class SentioraBackendTests
     }
 
     [Fact]
-    public async Task A_create_failure_does_not_consume_a_slot_on_the_host()
+    public async Task A_create_rejected_by_the_runtime_takes_neither_a_slot_nor_a_cycle()
     {
         var fake = new FakeSentioraTransport { FailCreateWith = "Invalid command" };
         using var host = await SentioraHost.StartAsync(fake, FakeSpec());
@@ -147,11 +147,109 @@ public class SentioraBackendTests
         await Assert.ThrowsAsync<SentioraProtocolException>(
             () => SentioraConsoleSession.CreateAsync(host, "sh", 80, 24, NoSink));
 
-        // A failed create is not a create/close cycle, so it must not push the host
-        // toward its recycling threshold or occupy one of its 16 slots.
+        // server.js throws before registering anything, so no session exists and no
+        // descriptor leaked: give back the slot AND the create cycle, or the host would
+        // retire early for creates that never happened.
         Assert.Equal(0, host.CreateCount);
         Assert.Equal(0, host.LiveSessions);
         Assert.True(host.CanAcceptSession);
+    }
+
+    [Fact]
+    public async Task A_malformed_create_result_frees_the_slot_so_the_host_keeps_its_capacity()
+    {
+        // A non-object result is the case that used to leak: SentioraObservation.From
+        // threw before the owner guard, bypassing the rollback entirely.
+        var fake = new FakeSentioraTransport { MalformedCreateResult = true };
+        using var host = await SentioraHost.StartAsync(fake, FakeSpec());
+
+        await Assert.ThrowsAsync<SentioraTransportException>(
+            () => SentioraConsoleSession.CreateAsync(host, "sh", 80, 24, NoSink));
+
+        Assert.Equal(0, host.LiveSessions);
+        // The runtime may well have registered the session before replying badly, so the
+        // cycle is still counted — conservative, and it only retires the host sooner.
+        Assert.Equal(1, host.CreateCount);
+        Assert.True(host.CanAcceptSession);
+    }
+
+    [Fact]
+    public async Task A_create_result_without_an_owner_token_frees_the_slot()
+    {
+        var fake = new FakeSentioraTransport { CreateResultWithoutOwner = true };
+        using var host = await SentioraHost.StartAsync(fake, FakeSpec());
+
+        var ex = await Assert.ThrowsAsync<SentioraTransportException>(
+            () => SentioraConsoleSession.CreateAsync(host, "sh", 80, 24, NoSink));
+
+        Assert.Contains("owner token", ex.Message);
+        Assert.Equal(0, host.LiveSessions);
+        Assert.Equal(1, host.CreateCount);
+        // Without the owner token the session cannot be closed, so no close is attempted.
+        Assert.DoesNotContain("terminal.close", fake.Calls);
+    }
+
+    [Fact]
+    public async Task A_transport_failure_during_create_frees_the_slot_but_still_counts_the_cycle()
+    {
+        var fake = new FakeSentioraTransport { FailCreateWithTransportError = true };
+        using var host = await SentioraHost.StartAsync(fake, FakeSpec());
+
+        await Assert.ThrowsAsync<SentioraTransportException>(
+            () => SentioraConsoleSession.CreateAsync(host, "sh", 80, 24, NoSink));
+
+        // Ambiguous: the write may have landed before the pipe broke. Counting the cycle
+        // is the safe error — under-counting is what lets a host run past the runtime's
+        // real ~500-cycle ceiling.
+        Assert.Equal(0, host.LiveSessions);
+        Assert.Equal(1, host.CreateCount);
+    }
+
+    [Fact]
+    public async Task A_throwing_output_callback_closes_the_runtime_session_and_frees_the_slot()
+    {
+        var fake = new FakeSentioraTransport();
+        using var host = await SentioraHost.StartAsync(fake, FakeSpec());
+
+        // The constructor paints the initial screen through the caller-supplied callback,
+        // so a throwing callback fails AFTER the runtime session exists. Without a close
+        // it would stay open inside the runtime with nobody holding its owner token —
+        // invisible to console_list and unreachable forever.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => SentioraConsoleSession.CreateAsync(host, "sh", 80, 24,
+                (_, _) => throw new InvalidOperationException("the output callback failed")));
+
+        Assert.Equal("the output callback failed", ex.Message);
+        Assert.Contains("terminal.close", fake.Calls);
+        Assert.Equal(fake.FirstSessionId, fake.LastCloseSessionId);
+        Assert.Equal(fake.OwnerOfFirstSession, fake.LastCloseOwner);
+        Assert.Equal(0, host.LiveSessions);
+        Assert.Equal(1, host.CreateCount); // created and closed: a real cycle, really leaked
+    }
+
+    [Fact]
+    public async Task Repeated_create_failures_do_not_inflate_the_hosts_live_session_count()
+    {
+        // SessionLimit is raised so this isolates the ADAPTER's accounting from the
+        // runtime's own cap. A malformed reply leaves a session registered inside the
+        // runtime that the adapter can never close — it never received the owner token —
+        // and that orphan is unavoidable. What must NOT also happen is the adapter losing
+        // the slot on its side, which would wedge the host while nothing is drivable.
+        var fake = new FakeSentioraTransport { MalformedCreateResult = true, SessionLimit = 1000 };
+        using var host = await SentioraHost.StartAsync(fake, FakeSpec());
+
+        for (var i = 0; i < SentioraHost.MaxConcurrentSessions + 4; i++)
+            await Assert.ThrowsAsync<SentioraTransportException>(
+                () => SentioraConsoleSession.CreateAsync(host, "sh", 80, 24, NoSink));
+
+        Assert.Equal(0, host.LiveSessions);
+        Assert.True(host.CanAcceptSession);
+
+        // And a good create still works afterwards on the same host.
+        fake.MalformedCreateResult = false;
+        using var session = await SentioraConsoleSession.CreateAsync(host, "sh", 80, 24, NoSink);
+        Assert.Equal(1, host.LiveSessions);
+        Assert.True(session.IsAlive);
     }
 
     [Fact]
