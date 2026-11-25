@@ -16,12 +16,14 @@ post one comment on the PR:
 
 > I have read the CLA Document and I hereby sign the CLA
 
-**Do not merge a PR while its `cla` check is red.** Note that as of 2026-11-25 this is enforced
-by review rather than by GitHub: `main` had no branch protection and the repository had no
-rulesets, so `cla` was not a *required* status check and a merge was not technically blocked —
-PR #70 merged with a red `cla`. Check the current state under
-*Settings → Branches* and *Settings → Rules → Rulesets* rather than trusting this sentence; it
-describes server-side settings that live outside the repository.
+**Do not merge a PR while its `cla` check is red.** As of 2026-11-25 this is enforced by review
+rather than by GitHub: `main` had no branch protection and the repository had no rulesets, so
+`cla` was not a *required* status check and a merge was not technically blocked — PR #70 merged
+with a red `cla` at merge time (run 45561034216 failed 26 minutes before the merge). Looking at
+that PR today shows a *green* `cla`, which is the later `closed`-event run 45564282509 locking the
+already-merged PR; it is not evidence the check passed before merging. Re-check the settings under
+*Settings → Branches* and *Settings → Rules → Rulesets* rather than trusting this sentence — it
+describes server-side state that lives outside the repository.
 
 ### For maintainers: the signature storage branch
 
@@ -45,23 +47,31 @@ a linked `egarim` account — verified with
 `gh api repos/egarim/telekinesis/pulls/<n>/commits`, which reported `"author": {"login":
 "egarim"}` for all of them (`34e8975`, `ef0899b`, `b9f0888`; `68b1e1e`, `3bb5a1e`; `7069ed6`,
 `63d03cd`, `5ad2506`, `89c87ee`, `3456583`, `580ed84`) — and all three still carried `cla` =
-FAILURE, from 2026-09-23 and 2026-09-29.
+FAILURE: #63 and #64 from 2026-09-29, #66 from 2026-09-23.
 
 Runs for a `pull_request_target: closed` event stayed green throughout, because they only lock
 the already-merged PR and never touch the file. That is what made this outage look intermittent
 rather than total.
 
-What the action does *internally* between resolving the allowlist and reading the file is
-deliberately not documented here. Three attempts to state it produced three different answers,
-and none is verifiable from this repository; only the observable behaviour above is
-evidence-backed. Do not infer the ordering from this text.
+Why allowlist membership did not help is settled by the pinned action's own source:
+`contributor-assistant/github-action@v2.6.1` (SHA `ca4a40a7`, pinned at
+`.github/workflows/cla.yml:21`) runs `getCommitters()` → `checkAllowList()` → `getFileContent()`
+in `setupClaCheck()`. The allowlist does filter the signer list first. But on a 404 it calls
+`createClaFileAndPRComment()`, which reports the storage error and then throws
+`Committers of pull request N have to sign the CLA` **unconditionally** — so the storage failure
+fails the run independently of who the committers were, and that second message does not imply
+the committer list was unfiltered. Re-derive this from the pinned SHA if the action is ever
+upgraded; it is an implementation detail, not a documented interface.
 
 To restore it, create an **orphan** branch named `cla-signatures` containing one file at
 `.github/cla-signatures.json`, holding a JSON object with an empty `signedContributors` array —
-**unless signatures already exist**, in which case restore the previous array instead. Recreating
-the branch empty discards every recorded signature and puts each past signer back in the red
-until they sign again. Leave the branch **unprotected**: the action pushes signature commits to it
-with `GITHUB_TOKEN`, under this workflow's `contents: write` permission.
+**unless signatures already existed**, in which case restore the previous array. Recreating the
+branch empty discards every recorded signature and puts each past signer back in the red until
+they sign again. That array has no other home: the branch is the only store, so the copy has to
+come from somewhere that fetched it before the deletion —
+`git show origin/cla-signatures:.github/cla-signatures.json` in any clone that still has the ref,
+or a saved copy of the file. Leave the branch **unprotected**: the action pushes signature
+commits to it with `GITHUB_TOKEN`, under this workflow's `contents: write` permission.
 
 Verify **both** halves, because they fail in different ways and the read path alone can pass on a
 repository that is still broken:
