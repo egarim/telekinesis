@@ -30,8 +30,11 @@ jobs:
           #    cla-signatures not found. Make sure the branch where signatures are
           #    stored is NOT protected."
           # and then fails the check with "Committers of pull request N have to sign
-          # the CLA" whoever the committers were. Runs for a `closed` event stay
-          # green because they only lock the merged PR and never read the file.
+          # the CLA". Being on `allowlist` does not save you: PRs #63, #64 and #66
+          # all failed while every commit was authored by an allowlisted, linked
+          # account. Runs for a `closed` event stay green because they only lock the
+          # merged PR and never read the file, which is what made the outage look
+          # intermittent rather than total.
           # The branch must exist, must contain this file (a JSON object with an
           # empty signedContributors array), and must stay unprotected because the
           # action commits signature updates to it with GITHUB_TOKEN under this

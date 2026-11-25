@@ -16,9 +16,12 @@ post one comment on the PR:
 
 > I have read the CLA Document and I hereby sign the CLA
 
-A red CLA check is expected to stop a PR from merging. Note that this is currently enforced
-by review rather than by GitHub: `main` has no branch protection and the repository has no
-rulesets, so `cla` is not a *required* status check and a merge is not technically blocked.
+**Do not merge a PR while its `cla` check is red.** Note that as of 2026-11-25 this is enforced
+by review rather than by GitHub: `main` had no branch protection and the repository had no
+rulesets, so `cla` was not a *required* status check and a merge was not technically blocked —
+PR #70 merged with a red `cla`. Check the current state under
+*Settings → Branches* and *Settings → Rules → Rulesets* rather than trusting this sentence; it
+describes server-side settings that live outside the repository.
 
 ### For maintainers: the signature storage branch
 
@@ -29,24 +32,35 @@ mixes with code history.
 
 `contributor-assistant/github-action` reads that file but **never creates the branch**. If it
 goes missing, every check that actually inspects signatures — a PR opened, a commit pushed to
-one, or a `recheck` comment — fails while setting up storage:
+one, or a `recheck` comment — fails while setting up storage. Excerpt from a real failure:
 
 > Error occurred when creating the signed contributors file: Branch cla-signatures not found.
 > Make sure the branch where signatures are stored is NOT protected.
 
-and the run then fails with `Committers of pull request N have to sign the CLA` regardless of
-who the committers were. Runs for a `pull_request_target: closed` event stay green, because
-they only lock the already-merged PR and never read the file — which is what made this outage
-look intermittent rather than total.
+The run then fails with `Committers of pull request N have to sign the CLA`. Being allowlisted
+does not save you: #63, #64 and #66 each had `cla` = FAILURE while every one of their commits
+was authored by `egarim`, who is on the `allowlist`. Restoring the branch, not the committer
+list, is what turns the check green.
+
+Runs for a `pull_request_target: closed` event stay green, because they only lock the
+already-merged PR and never read the file. That is what made this outage look intermittent
+rather than total.
 
 To restore it, create an **orphan** branch named `cla-signatures` containing one file at
 `.github/cla-signatures.json`, holding a JSON object with an empty `signedContributors` array.
 Leave the branch **unprotected**: the action pushes signature commits to it with
 `GITHUB_TOKEN`, under this workflow's `contents: write` permission.
 
-Verify by opening a PR, or pushing a commit to an existing one, and confirming the `cla` check
-goes green. Do **not** verify with `recheck` on an old PR: it refreshes the PR's status by
-asking GitHub to re-run the *original* run, which GitHub refuses past 30 days
+To verify, open a PR (or push a commit to one) and read the `cla` job log: it must **not**
+contain `Error occurred when creating the signed contributors file`. Check the log rather than
+trusting the colour of the check, because a second and unrelated cause of a red `cla` exists in
+this repository's history — a commit whose author email is not linked to any GitHub account,
+which the bot reports as *"… seems not to be a GitHub user"* and which restoring the branch
+cannot fix. Several commits on the PR #70 branch were authored that way, by a machine whose
+global git identity was still the `Your Name` placeholder.
+
+Do **not** verify with `recheck` on an old PR: it refreshes the PR's status by asking GitHub to
+re-run the *original* run, which GitHub refuses past 30 days
 (`Unable to retry this workflow run because it was created over a month ago`). The recheck
 itself still succeeds and logs `All contributors have signed the CLA`, but the stale red check
 survives it — only a new commit on that PR branch clears it.
