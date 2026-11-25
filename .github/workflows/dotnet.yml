@@ -1,0 +1,71 @@
+name: .NET
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows builds the whole solution, including the net10.0-windows target
+        # that only compiles on Windows. ubuntu runs the same test projects against
+        # the portable net10.0 graph, which is the only place the Unix PTY path in
+        # Telekinesis.Linux is compiled and exercised. windows-11-arm is here
+        # because ConPTY behaviour is architecture-sensitive (issues #46/#49 were
+        # both found on ARM64), so x64 passing must not be taken to cover it.
+        os: [windows-latest, windows-11-arm, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    # The suites run in seconds; this budget covers a cold restore and, more
+    # importantly, stops a hang from burning the six hour account limit.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Record environment
+        run: |
+          dotnet --version
+          echo "os=${{ runner.os }} arch=${{ runner.arch }}"
+
+      # Only Windows can build Telekinesis.Windows (net10.0-windows) and the
+      # net10.0-windows variant of Telekinesis.Cli.
+      - name: Build solution
+        if: runner.os == 'Windows'
+        run: dotnet build Telekinesis.slnx -c Release --nologo
+
+      # Test projects are enumerated explicitly rather than testing the solution,
+      # because Telekinesis.slnx does not list Medium.Tests, Medium.Generators.Tests
+      # or Medium.Blazor.Tests -- `dotnet test Telekinesis.slnx` silently skips 70
+      # passing tests. bash on every leg so a mid-list failure cannot be masked by a
+      # later success, which is how a hanging or failing suite slips through.
+      - name: Test
+        shell: bash
+        run: |
+          set -euo pipefail
+          for p in Cli.Tests Medium.Tests Medium.Generators.Tests Medium.Blazor.Tests; do
+            echo "::group::$p"
+            dotnet test "src/Telekinesis.$p/Telekinesis.$p.csproj" \
+              -c Release --nologo --logger "trx;LogFileName=$p.trx"
+            echo "::endgroup::"
+          done
+
+      - name: Diagnostics after failure
+        if: failure()
+        run: dotnet --info
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: '**/*.trx'
+          if-no-files-found: warn
