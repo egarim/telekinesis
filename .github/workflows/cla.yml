@@ -22,6 +22,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # Signature storage lives on the orphan branch named by `branch:` below,
+          # NOT on main. The action reads that file but never creates the branch, so
+          # if it is ever missing every run dies with
+          #   "Branch cla-signatures not found. Make sure the branch where
+          #    signatures are stored is NOT protected."
+          # before the allowlist is consulted -- which reports every committer,
+          # allowlisted owner included, as unsigned and blocks every pull request.
+          # The branch must exist, must contain this file (initially
+          # {"signedContributors": []}), and must stay unprotected because the
+          # action commits signature updates to it with GITHUB_TOKEN under this
+          # workflow's `contents: write`. See CONTRIBUTING.md.
           path-to-signatures: '.github/cla-signatures.json'
           path-to-document: 'https://github.com/egarim/telekinesis/blob/main/CLA.md'
           branch: 'cla-signatures'

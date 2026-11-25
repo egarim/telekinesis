@@ -18,6 +18,28 @@ post one comment on the PR:
 
 PRs cannot merge until the CLA check is green.
 
+### For maintainers: the signature storage branch
+
+Signatures are stored on the orphan branch
+[`cla-signatures`](https://github.com/egarim/telekinesis/tree/cla-signatures) in
+`.github/cla-signatures.json` — deliberately not on `main`, so signature history never
+mixes with code history.
+
+`contributor-assistant/github-action` reads that file but **never creates the branch**.
+If it goes missing, every CLA check fails with
+`Branch cla-signatures not found. Make sure the branch where signatures are stored is NOT
+protected.` — and because that happens before the allowlist is consulted, *every* committer
+is reported as unsigned, including the allowlisted owner, so no PR in the repo can merge.
+Recreate it as an orphan branch holding only `{"signedContributors": []}`, and keep it
+unprotected: the action pushes signature commits to it with `GITHUB_TOKEN` under the
+workflow's `contents: write` permission.
+
+Commenting `recheck` re-runs the check, but it refreshes the PR's status by asking GitHub
+to re-run the *original* run — which GitHub refuses for runs older than 30 days
+(`Unable to retry this workflow run because it was created over a month ago`). The recheck
+itself still succeeds and logs `All contributors have signed the CLA`, but on an old PR the
+stale red `cla` check survives it. A new commit on the PR branch is what clears it.
+
 ## Development
 
 - .NET 10 SDK. `dotnet build` at the repo root builds everything; the CLI multi-targets
