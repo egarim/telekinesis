@@ -93,7 +93,8 @@ public class UnixPtySessionTests
 
         using var consoles = new ConsoleSessionService();
         var entry = consoles.Open("/bin/sh", 80, 24);
-        entry.Session.Write("echo pty-roundtrip-$((40+2))\r");
+        // Exercises the poll(POLLOUT)-bounded write against a REAL pty (issue #61).
+        Assert.True(entry.Session.Write("echo pty-roundtrip-$((40+2))\r", TimeSpan.FromSeconds(5)));
 
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (DateTime.UtcNow < deadline && !entry.Screen.Render().Contains("pty-roundtrip-42"))

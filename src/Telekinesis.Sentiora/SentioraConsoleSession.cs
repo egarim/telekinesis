@@ -213,7 +213,30 @@ public sealed class SentioraConsoleSession : IConsoleSession, IConsoleSessionGeo
         }
     }
 
-    public void Write(string text) => WriteAsync(text).GetAwaiter().GetResult();
+    /// <summary>Bounded write (issue #61). Unlike a local PTY this path is already
+    /// asynchronous and takes a CancellationToken on every request, so the bound is
+    /// real: the in-flight <c>terminal.type</c> is cancelled at its next await rather
+    /// than abandoned on a blocked thread. Returns <c>false</c> only when the deadline
+    /// expired; a protocol failure still surfaces as itself.</summary>
+    public bool Write(string text, TimeSpan timeout)
+    {
+        // A CancellationTokenSource rejects an interval below -1 ms. A zero or negative
+        // budget means "do not wait": report that the write did not complete rather
+        // than attempting one that cannot succeed.
+        var budget = timeout < TimeSpan.Zero ? TimeSpan.Zero : timeout;
+        using var cts = new CancellationTokenSource(budget);
+        try
+        {
+            // GetResult() unwraps without AggregateException, so a SentioraProtocolException
+            // reaches the caller as itself instead of wrapped.
+            WriteAsync(text, cts.Token).GetAwaiter().GetResult();
+            return true;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
 
     internal async Task WriteAsync(string text, CancellationToken ct = default)
     {

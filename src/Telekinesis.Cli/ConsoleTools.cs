@@ -16,8 +16,21 @@ public sealed class ConsoleSessionService : IDisposable
 {
     public sealed record Entry(string Id, IConsoleSession Session, TerminalScreen Screen, DateTimeOffset Opened);
 
+    /// <summary>Most sessions alive at once (issue #62). Each is a live child
+    /// process plus a screen, and sessions only die on console_close or server exit —
+    /// so an agent that opens and never closes leaks processes for the life of the
+    /// server. Nothing else in this tier is unbounded any more.</summary>
+    public const int MaxSessions = 16;
+
     private readonly ConcurrentDictionary<string, Entry> _sessions = new();
     private int _next;
+
+    /// <summary>Slots RESERVED, not sessions inserted. Counting the dictionary and
+    /// then spawning let concurrent opens all see room and all get it: the check and
+    /// the claim have to be one atomic step, and the claim has to happen before the
+    /// child process exists — including the out-of-process Sentiora host.</summary>
+    private int _reserved;
+
     private volatile bool _disposed;
 
     /// <summary>Test seam: replaces the backend factory. Must be set before the first
@@ -63,61 +76,81 @@ public sealed class ConsoleSessionService : IDisposable
             ? OperatingSystem.IsWindows() ? "cmd.exe" : Environment.GetEnvironmentVariable("SHELL") ?? "/bin/sh"
             : shell;
 
-        // Opt-in Sentiora Terminal backend (issue #67), tried BEFORE the Windows gate
-        // below — it is the path that can serve Windows while ConPTY child-attach is
-        // broken (#46/#49). Off unless TELEKINESIS_SENTIORA=1, and when it fails the
-        // reason is announced on stderr and we fall through to the native backend:
-        // #67 requires it to be unambiguous which backend is active, so a silent
-        // fallback is the one thing this must not do.
-        if (SentioraBackend.IsEnabled)
+        // Claim a slot BEFORE spawning anything, and name the way out — an agent that
+        // hits the cap needs to know it should close sessions, not retry (issue #62).
+        if (Interlocked.Increment(ref _reserved) > MaxSessions)
         {
-            var sentioraScreen = new TerminalScreen(cols, rows);
-            try
-            {
-                var sentioraSession = _sentiora.Value.Open(shell, cols, rows, sentioraScreen.Feed);
-                // The runtime clamps harder than Telekinesis does (cols 2-300, rows
-                // 2-150 vs 2-1000), so the grid must be told the size the PTY actually
-                // got — otherwise console_open reports dimensions the child never had.
-                if (sentioraSession is IConsoleSessionGeometry geometry &&
-                    (geometry.AppliedCols != cols || geometry.AppliedRows != rows))
-                    sentioraScreen.Resize(geometry.AppliedCols, geometry.AppliedRows);
-                return Register(sentioraSession, sentioraScreen);
-            }
-            // A disposed service must still surface as disposed rather than being
-            // mistaken for a backend failure and retried on the native path.
-            catch (Exception ex) when (ex is not ObjectDisposedException)
-            {
-                Console.Error.WriteLine(
-                    "[telekinesis] TELEKINESIS_SENTIORA=1 but the Sentiora console backend could not be "
-                    + $"used ({ex.Message}); falling back to the native console backend.");
-            }
+            Interlocked.Decrement(ref _reserved);
+            throw new InvalidOperationException(
+                $"Too many console sessions ({_sessions.Count}/{MaxSessions}). "
+                + "Close one with console_close; console_list shows what is open.");
         }
 
-        // Windows ConPTY is not enabled by default: on Win11 ARM64 (build 26200) the
-        // child process does not bind to the pseudoconsole and renders to the parent
-        // console instead — which would corrupt the MCP stdio stream (issue #46, its
-        // "Windows ConPTY child-attach" follow-up). The implementation ships and is
-        // canonical; opt in with TELEKINESIS_CONPTY=1 to exercise it once a fixing
-        // Windows build lands. Linux/macOS PTY sessions are fully supported.
-        if (OperatingSystem.IsWindows() &&
-            Environment.GetEnvironmentVariable("TELEKINESIS_CONPTY") != "1")
-            throw new PlatformNotSupportedException(
-                "Interactive console sessions are not yet supported on Windows "
-                + "(ConPTY child-attach limitation, issue #46). Linux/macOS are supported; "
-                + "set TELEKINESIS_CONPTY=1 to force-enable the experimental Windows path, "
-                + "or TELEKINESIS_SENTIORA=1 for the out-of-process Sentiora backend (issue #67).");
+        try
+        {
+            // Opt-in Sentiora Terminal backend (issue #67), tried BEFORE the Windows gate
+            // below — it is the path that can serve Windows while ConPTY child-attach is
+            // broken (#46/#49). Off unless TELEKINESIS_SENTIORA=1, and when it fails the
+            // reason is announced on stderr and we fall through to the native backend:
+            // #67 requires it to be unambiguous which backend is active, so a silent
+            // fallback is the one thing this must not do.
+            if (SentioraBackend.IsEnabled)
+            {
+                var sentioraScreen = new TerminalScreen(cols, rows);
+                try
+                {
+                    var sentioraSession = _sentiora.Value.Open(shell, cols, rows, sentioraScreen.Feed);
+                    // The runtime clamps harder than Telekinesis does (cols 2-300, rows
+                    // 2-150 vs 2-1000), so the grid must be told the size the PTY actually
+                    // got — otherwise console_open reports dimensions the child never had.
+                    if (sentioraSession is IConsoleSessionGeometry geometry &&
+                        (geometry.AppliedCols != cols || geometry.AppliedRows != rows))
+                        sentioraScreen.Resize(geometry.AppliedCols, geometry.AppliedRows);
+                    return Register(sentioraSession, sentioraScreen);
+                }
+                // A disposed service must still surface as disposed rather than being
+                // mistaken for a backend failure and retried on the native path.
+                catch (Exception ex) when (ex is not ObjectDisposedException)
+                {
+                    Console.Error.WriteLine(
+                        "[telekinesis] TELEKINESIS_SENTIORA=1 but the Sentiora console backend could not be "
+                        + $"used ({ex.Message}); falling back to the native console backend.");
+                }
+            }
 
-        var screen = new TerminalScreen(cols, rows);
-        IConsoleSession session =
+            // Windows ConPTY is not enabled by default: on Win11 ARM64 (build 26200) the
+            // child process does not bind to the pseudoconsole and renders to the parent
+            // console instead — which would corrupt the MCP stdio stream (issue #46, its
+            // "Windows ConPTY child-attach" follow-up). The implementation ships and is
+            // canonical; opt in with TELEKINESIS_CONPTY=1 to exercise it once a fixing
+            // Windows build lands. Linux/macOS PTY sessions are fully supported.
+            if (OperatingSystem.IsWindows() &&
+                Environment.GetEnvironmentVariable("TELEKINESIS_CONPTY") != "1")
+                throw new PlatformNotSupportedException(
+                    "Interactive console sessions are not yet supported on Windows "
+                    + "(ConPTY child-attach limitation, issue #46). Linux/macOS are supported; "
+                    + "set TELEKINESIS_CONPTY=1 to force-enable the experimental Windows path, "
+                    + "or TELEKINESIS_SENTIORA=1 for the out-of-process Sentiora backend (issue #67).");
+
+            var screen = new TerminalScreen(cols, rows);
+            IConsoleSession session =
 #if WINDOWS
-            new Telekinesis.Windows.ConPtyConsoleSession(shell, cols, rows, screen.Feed);
+                new Telekinesis.Windows.ConPtyConsoleSession(shell, cols, rows, screen.Feed);
 #else
-            OperatingSystem.IsWindows()
-                ? throw new PlatformNotSupportedException(
-                    "This build does not include ConPTY; run the net10.0-windows target.")
-                : new Telekinesis.Linux.UnixPtyConsoleSession(shell, cols, rows, screen.Feed);
+                OperatingSystem.IsWindows()
+                    ? throw new PlatformNotSupportedException(
+                        "This build does not include ConPTY; run the net10.0-windows target.")
+                    : new Telekinesis.Linux.UnixPtyConsoleSession(shell, cols, rows, screen.Feed);
 #endif
-        return Register(session, screen);
+            return Register(session, screen);
+        }
+        catch
+        {
+            // The slot was claimed before the child existed; give it back on any
+            // failure, or a few failed spawns would permanently shrink the cap.
+            Interlocked.Decrement(ref _reserved);
+            throw;
+        }
     }
 
     private Entry Register(IConsoleSession session, TerminalScreen screen)
@@ -125,6 +158,8 @@ public sealed class ConsoleSessionService : IDisposable
         var entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
         _sessions[entry.Id] = entry;
         // If Dispose() raced ahead of the insert, this session would leak — reap it now.
+        // The caller's catch returns the reserved slot, so removing the entry and
+        // throwing releases exactly one unit.
         if (_disposed && _sessions.TryRemove(entry.Id, out _))
         {
             session.Dispose();
@@ -138,6 +173,7 @@ public sealed class ConsoleSessionService : IDisposable
     /// RegisterForTest).</summary>
     internal Entry RegisterForTest(IConsoleSession session, TerminalScreen screen)
     {
+        Interlocked.Increment(ref _reserved);
         var entry = new Entry($"con{Interlocked.Increment(ref _next)}", session, screen, DateTimeOffset.Now);
         _sessions[entry.Id] = entry;
         return entry;
@@ -164,7 +200,11 @@ public sealed class ConsoleSessionService : IDisposable
     {
         // TryRemove makes exactly one caller win the entry, so Close/Dispose never
         // double-dispose the same session.
-        if (_sessions.TryRemove(id, out var e)) e.Session.Dispose();
+        if (_sessions.TryRemove(id, out var e))
+        {
+            Interlocked.Decrement(ref _reserved);
+            e.Session.Dispose();
+        }
         else throw new KeyNotFoundException($"No console session '{id}'.");
     }
 
@@ -173,7 +213,10 @@ public sealed class ConsoleSessionService : IDisposable
         _disposed = true;
         foreach (var id in _sessions.Keys)
             if (_sessions.TryRemove(id, out var e))
+            {
+                Interlocked.Decrement(ref _reserved);
                 e.Session.Dispose();
+            }
         // After the sessions, so no session tries to reach a host that is already gone.
         // IsValueCreated first: disposing must not CONSTRUCT a backend that was never
         // used, which is what an unconditional _sentiora.Value would do.
@@ -211,6 +254,11 @@ public static class ConsoleTools
         }, PerceptionTools.Json);
     }
 
+    /// <summary>How long a write waits for the child to drain its input before
+    /// giving up (issue #61). Generous for a program that is merely busy, short
+    /// enough that one that never reads cannot hang the MCP request.</summary>
+    internal static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(5);
+
     [McpServerTool(Name = "console_write")]
     [Description("Write text to a console session's stdin. sendEnter appends the Enter key. Send \"\\u0003\" for Ctrl-C.")]
     public static async Task<string> ConsoleWrite(
@@ -226,10 +274,19 @@ public static class ConsoleTools
         CancellationToken ct = default)
     {
         var entry = consoles.Get(sessionId);
-        entry.Session.Write(sendEnter is not false ? text + "\r" : text);
-        AuditLog.Append("console_write", $"{sessionId}: {text}", true, "pty");
+        var wrote = entry.Session.Write(sendEnter is not false ? text + "\r" : text, WriteTimeout);
+        AuditLog.Append("console_write", $"{sessionId}: {text}", wrote, "pty");
         await Task.Delay(250, ct); // give the program a beat to react before the usual read
-        return JsonSerializer.Serialize(new { ok = true, alive = entry.Session.IsAlive }, PerceptionTools.Json);
+        return JsonSerializer.Serialize(new
+        {
+            ok = wrote,
+            alive = entry.Session.IsAlive,
+            // Say WHY, or an agent retries the write that just timed out.
+            note = wrote ? null
+                : "The child is not reading stdin, so the write timed out and may have "
+                  + "landed only partially. Check console_read; it may be a program that "
+                  + "does not take input, or one waiting on something else.",
+        }, PerceptionTools.Json);
     }
 
     [McpServerTool(Name = "console_read")]

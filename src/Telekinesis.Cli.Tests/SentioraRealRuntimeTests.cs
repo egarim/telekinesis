@@ -91,7 +91,7 @@ public class SentioraRealRuntimeTests(ITestOutputHelper output)
         var session = await backend.OpenAsync(DefaultShell(), 100, 24, screen.Feed);
         try
         {
-            session.Write($"echo {marker}\r");
+            session.Write($"echo {marker}\r", TimeSpan.FromSeconds(30));
 
             var appeared = await Eventually(() => screen.Render().Contains(marker), 60_000);
             output.WriteLine($"[real-runtime] marker '{marker}' reached the screen: {appeared}");
@@ -159,10 +159,10 @@ public class SentioraRealRuntimeTests(ITestOutputHelper output)
         try
         {
             var setCommand = OperatingSystem.IsWindows() ? $"set {key}={value}" : $"{key}={value}; export {key}";
-            session.Write(setCommand + "\r");
+            session.Write(setCommand + "\r", TimeSpan.FromSeconds(30));
             await Eventually(() => screen.Render().Contains(value) || screen.Render().Contains(key), 30_000);
 
-            session.Write(OperatingSystem.IsWindows() ? $"echo SEEN=%{key}%\r" : $"echo SEEN=${key}\r");
+            session.Write(OperatingSystem.IsWindows() ? $"echo SEEN=%{key}%\r" : $"echo SEEN=${key}\r", TimeSpan.FromSeconds(30));
             var saw = await Eventually(() => screen.Render().Contains($"SEEN={value}"), 30_000);
             output.WriteLine($"[real-runtime] state persisted across writes: {saw}");
             output.WriteLine($"[real-runtime] screen:\n{screen.Render()}");
