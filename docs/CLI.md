@@ -298,6 +298,10 @@ changes nothing.
 | `TELEKINESIS_CDP` | CDP tier | `1` or `true` enables the browser DevTools tier ([BROWSERS.md](BROWSERS.md)) |
 | `TELEKINESIS_CDP_PORT` | CDP tier | debugging port to attach to (default `9222`) |
 | `TELEKINESIS_CONPTY` | console tier | `1` force-enables the experimental Windows ConPTY path ([CONSOLE.md](CONSOLE.md)) |
+| `TELEKINESIS_SENTIORA` | console tier | `1` (exactly, like `TELEKINESIS_CONPTY`) selects the out-of-process Sentiora Terminal backend instead of the native PTY ([CONSOLE.md](CONSOLE.md#optional-backend-sentiora-terminal)) |
+| `TELEKINESIS_SENTIORA_CMD` | console tier | explicit command line for the Sentiora runtime, e.g. `node /path/to/src/server.js` |
+| `TELEKINESIS_SENTIORA_SERVER` | console tier | path to Sentiora's `server.js`, run under Node |
+| `TELEKINESIS_SENTIORA_NODE` | console tier | Node executable for `TELEKINESIS_SENTIORA_SERVER` (default `node`) |
 | `TELEKINESIS_CREDENTIAL_CMD` | `fill_credential` | host command that types the secret ([REMOTE.md](REMOTE.md#credentials--the-handoff-rule)) |
 | `TELEKINESIS_SHOW_INTENT` | actions | `1` or `true` flashes each injected action's target before the input lands ([XRAY-OVERLAY.md](XRAY-OVERLAY.md)) |
 | `TELEKINESIS_NO_RELAY` | Windows relay | `1` disables the console-session relay |
@@ -315,6 +319,10 @@ changes nothing.
 
 That is the complete set — every `GetEnvironmentVariable` call in the tree.
 Boolean-ish variables accept `1` or `true`; anything else reads as off.
+The console tier's two backend switches (`TELEKINESIS_CONPTY`, `TELEKINESIS_SENTIORA`)
+are stricter and accept only `1`. With no `TELEKINESIS_SENTIORA_*` variable set, the
+Sentiora backend also consults `PATH` (and `PATHEXT` on Windows) for a
+`sentiora-terminal` executable.
 
 `TK_CRED_FIELD`, `TK_CRED_APP` and `TK_CRED_ELEMENT` are set *by* Telekinesis
 for the credential provider it invokes — they are outputs, not settings.
