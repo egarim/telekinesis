@@ -11,6 +11,66 @@ namespace Telekinesis.Cli;
 /// </summary>
 internal static class Usage
 {
+    private static readonly string[] HelpWords = ["--help", "-h", "-?", "/?", "help"];
+
+    /// <summary>Flags that consume no value, so a help word after one really is a
+    /// help request. Being wrong about a flag in this list costs a missed help
+    /// message; being wrong the other way costs a false green in CI, so the default
+    /// is "it is a value" and this list stays short.
+    ///
+    /// A hand-maintained list is how the original bug got in, so it is machine-checked:
+    /// every flag the CLI reads with <c>args.Contains("--x")</c> is presence-only by
+    /// construction and must appear here (<c>ValuelessFlagsTests</c>). <c>--sse</c> is
+    /// the one deliberate extra — it is not a real flag at all, just an ignored token
+    /// older examples still pass (docs/CLI.md).</summary>
+    internal static readonly string[] ValuelessFlags =
+        ["--enable-actions", "--read-only", "--dry-run", "--overlay", "--parse", "--recall", "--show", "--sse"];
+
+    /// <summary>Verbs whose first operand is free-form human text, where a bare
+    /// `help` is far more likely to be the operand than a request for help:
+    /// `pilot help --app pid:1` is a goal. Not `run`/`pilot-eval`, whose operand is
+    /// a path — there a bare `help` really does read as asking for help.</summary>
+    private static readonly string[] FreeTextOperandVerbs = ["pilot"];
+
+    /// <summary>
+    /// Is this command line asking for help? (issue #55)
+    ///
+    /// A help word as the FIRST argument always is. Anywhere else it only counts
+    /// when a one-shot verb does not own the line — those forward operands verbatim
+    /// — and when it is not sitting in a flag's VALUE position.
+    ///
+    /// That last rule is not hypothetical: `assert --name help` asks whether a
+    /// control named "help" exists, which is an ordinary CI assertion because
+    /// --name is a case-insensitive substring query. Treating it as a help request
+    /// turned the project's own 0/1 CI gate into a silent exit 0.
+    /// </summary>
+    public static bool IsHelpRequest(string[] args, Func<string?, bool> oneShotOwnsArgs)
+    {
+        if (args.Length == 0) return false;
+        if (HelpWords.Contains(args[0])) return true;
+        if (oneShotOwnsArgs(args[0])) return false;
+
+        for (var i = 1; i < args.Length; i++)
+        {
+            if (!HelpWords.Contains(args[i])) continue;
+
+            // The operand of a free-text verb is a value, not a request.
+            if (i == 1 && FreeTextOperandVerbs.Contains(args[0])) continue;
+
+            var previous = args[i - 1];
+            // `--port=3001` carries its own value, so it consumes nothing and what
+            // follows is a fresh argument — without this, `--port=3001 --help`
+            // printed no help.
+            if (previous.Contains('=')) return true;
+            if (!previous.StartsWith('-') || ValuelessFlags.Contains(previous)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Is this asking for the version? First argument only.</summary>
+    public static bool IsVersionRequest(string[] args) =>
+        args.FirstOrDefault() is "--version" or "-v";
+
     /// <summary>Informational version without the `+commit` build metadata.</summary>
     public static string Version
     {
