@@ -15,6 +15,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Telekinesis.Cli\Telekinesis.Cli.csproj" SetTargetFramework="TargetFramework=net10.0" />
+    <!-- Direct reference so the Sentiora adapter's internal transport seam can be
+         faked (issue #67); Telekinesis.Sentiora grants InternalsVisibleTo this project. -->
+    <ProjectReference Include="..\Telekinesis.Sentiora\Telekinesis.Sentiora.csproj" />
   </ItemGroup>
 
 </Project>

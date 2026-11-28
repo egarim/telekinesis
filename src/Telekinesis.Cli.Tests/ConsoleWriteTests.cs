@@ -110,6 +110,25 @@ public class ConsoleWriteTests
     }
 
     [Fact]
+    public void A_failed_open_does_not_shrink_the_session_cap()
+    {
+        // The slot is claimed BEFORE the child exists (issue #62), so every failed
+        // open has to give it back. Without that, failed spawns permanently shrink the
+        // cap — and on Windows the ConPTY gate rejects every open until #46/#49 is
+        // fixed, which would make the leak total rather than rare.
+        if (!OperatingSystem.IsWindows() ||
+            Environment.GetEnvironmentVariable("TELEKINESIS_CONPTY") == "1") return;
+
+        using var svc = new ConsoleSessionService();
+        for (var i = 0; i < ConsoleSessionService.MaxSessions * 2; i++)
+        {
+            // Still the platform gate, never "Too many console sessions": a slot taken
+            // by a spawn that failed must be available to the next attempt.
+            Assert.Throws<PlatformNotSupportedException>(() => svc.Open("cmd.exe", 80, 24));
+        }
+    }
+
+    [Fact]
     public void A_megabyte_paste_to_a_child_that_never_reads_stdin_is_BOUNDED()
     {
         // Issue #61's actual contract: a write must never hang the caller. It may
