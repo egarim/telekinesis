@@ -1,0 +1,301 @@
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json.Nodes;
+
+namespace Telekinesis.Pilot;
+
+/// <summary>
+/// A "System 1" brain (issue #65): TypeSafe's Jev answers *enumerated* questions
+/// rather than writing JSON. We hand it the same state the LLM brain sees plus a
+/// `choice` question per field, and it returns one option from the set we defined
+/// — so the action schema is enforced by construction, not by parsing.
+///
+/// Two consequences shape this class:
+/// * <b>No text generation.</b> Jev cannot invent a string, so the `type` verb is
+///   not offered at all — offering an action it can never complete would only
+///   produce actions that <see cref="PilotAction.Validate"/> rejects. `press`
+///   works because a key combination can be enumerated.
+/// * <b>No instruction channel.</b> The `system` prompt is ignored; the task lives
+///   in each question's `instructions`, which is where Jev takes direction.
+/// </summary>
+public sealed class JevBrain : ILocalBrain
+{
+    public const string KeyEnvVar = "TELEKINESIS_JEV_KEY";
+    public const string UrlEnvVar = "TELEKINESIS_JEV_URL";
+    public const string ModelEnvVar = "TELEKINESIS_JEV_MODEL";
+
+    public const string DefaultUrl = "https://api.typesafe.ai/v1/systemone";
+
+    /// <summary>Any server speaking the same contract works — notably
+    /// <see href="https://github.com/daseinlabs/open-jev">open-jev</see>, which serves
+    /// /v1/systemone from a local Gemma 3 4B on Apple silicon. It needs no key unless
+    /// OPENJEV_API_KEY is set, which is why the key here is optional.</summary>
+    public const string LocalUrl = "http://localhost:8000/v1/systemone";
+    public const string DefaultModel = "jev-latest";
+
+    /// <summary>Sentinel option for "this action needs no target" — a choice set
+    /// cannot express "none of the above" on its own.</summary>
+    public const string NoTarget = "none";
+
+    /// <summary>The verbs this brain can actually carry out (no `type`, see above).</summary>
+    private static readonly Dictionary<string, string> ActionCriteria = new()
+    {
+        ["click"] = "Activate one of the candidate elements (press a button, open a menu item, follow a link).",
+        ["press"] = "Send a key combination to the application instead of clicking anything.",
+        ["scroll"] = "Scroll the window down to bring more elements into view.",
+        ["wait"] = "Do nothing this step; the application is still busy.",
+        ["done"] = "The goal is already satisfied by what the readouts show. Do not guess: only choose this when the state proves it.",
+    };
+
+    /// <summary>Keys `press` may send. Enumerated because Jev picks from a set
+    /// rather than writing one.</summary>
+    private static readonly Dictionary<string, string> KeyCriteria = new()
+    {
+        ["enter"] = "Confirm, submit, or activate the focused element.",
+        ["tab"] = "Move focus to the next element.",
+        ["escape"] = "Dismiss a dialog, menu, or popup.",
+        ["backspace"] = "Delete the character before the caret.",
+        ["delete"] = "Delete the character after the caret, or the selection.",
+        ["ctrl+a"] = "Select all.",
+        ["ctrl+s"] = "Save.",
+        ["ctrl+c"] = "Copy the selection.",
+        ["ctrl+v"] = "Paste.",
+        ["up"] = "Move up one item or line.",
+        ["down"] = "Move down one item or line.",
+        ["left"] = "Move left one item or character.",
+        ["right"] = "Move right one item or character.",
+        ["home"] = "Go to the start.",
+        ["end"] = "Go to the end.",
+    };
+
+    /// <summary>Jev caps a choice at 255 options; leave room for the sentinel.</summary>
+    private const int MaxTargets = 254;
+
+    private readonly HttpClient _http;
+    private readonly bool _ownsHttp;
+    private readonly string _url;
+    private readonly string _model;
+    private readonly string? _key;
+
+    public JevBrain(string? url = null, string? model = null, string? apiKey = null, HttpClient? http = null)
+    {
+        _url = (url ?? Environment.GetEnvironmentVariable(UrlEnvVar) ?? DefaultUrl).TrimEnd('/');
+        _model = model ?? Environment.GetEnvironmentVariable(ModelEnvVar) ?? DefaultModel;
+        _key = apiKey ?? Environment.GetEnvironmentVariable(KeyEnvVar);
+        _ownsHttp = http is null;
+        _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+    }
+
+    public string Name => $"{_model} @ {_url}";
+
+    /// <summary>
+    /// Whether this brain is usable. A self-hosted server (open-jev) answers
+    /// GET /health and may need no key at all; the hosted API publishes no health
+    /// endpoint and always needs one. So: a health check decides it when the server
+    /// answers, and otherwise a configured key is the only evidence available —
+    /// a wrong key still fails at the first decision with 401.
+    /// </summary>
+    public async Task<bool> ProbeAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(3));
+            using var response = await _http.GetAsync(HealthUrl, cts.Token);
+            if (response.IsSuccessStatusCode) return true;
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            // No health endpoint (or nothing listening) — fall through to the key.
+        }
+        return !string.IsNullOrWhiteSpace(_key);
+    }
+
+    /// <summary>/health sits at the server root, beside the versioned route.</summary>
+    private string HealthUrl =>
+        Uri.TryCreate(_url, UriKind.Absolute, out var uri)
+            ? new Uri(uri, "/health").ToString()
+            : _url + "/health";
+
+    public async Task<(string Json, int LatencyMs)> DecideAsync(
+        string system, string user, IReadOnlyList<BrainOption> targets, CancellationToken ct = default)
+    {
+        // Offer only verbs that can actually be completed from here. With no
+        // candidates there is no target question, so a "click" answer could never
+        // be finished — same reasoning that keeps `type` off the menu entirely.
+        var offered = targets.Take(MaxTargets).ToList();
+        var actions = offered.Count > 0
+            ? ActionCriteria
+            : ActionCriteria.Where(kv => kv.Key != "click").ToDictionary(kv => kv.Key, kv => kv.Value);
+
+        // MEASURED: each question is its own prefill + batched pass, so latency is
+        // linear in question count (~430 ms each on an M1 Max via open-jev; 1259 ms
+        // for three, 771 ms for two). The key is only ever used by `press`, so it is
+        // asked in a second call, on the rare step that chose `press`, instead of
+        // being paid for on every step.
+        var questions = new JsonObject
+        {
+            ["action"] = Choice(
+                "Choose the single next action that makes progress toward the goal, given the "
+                + "current screen, the readouts, and what the previous action did.",
+                actions),
+        };
+
+        // A choice needs something to choose between: with no candidates there is
+        // no target question at all, rather than one whose only option is "none".
+        if (offered.Count > 0)
+        {
+            var criteria = new Dictionary<string, string>(offered.Count + 1);
+            foreach (var o in offered) criteria[o.Id] = o.Description;
+            criteria[NoTarget] = "The chosen action acts on no particular element (press, scroll, wait, done).";
+            questions["target"] = Choice(
+                "Which candidate element should the action act on? Choose "
+                + $"'{NoTarget}' when the action needs no element.",
+                criteria);
+        }
+
+        var sw = Stopwatch.StartNew();
+        var answers = await AskAsync(user, questions, ct);
+
+        // Second call only when the chosen action needs a key.
+        if (Chosen(answers, "action") is "press")
+        {
+            var keyAnswers = await AskAsync(user, new JsonObject
+            {
+                ["key"] = Choice("The next action is to press a key. Which key combination should be sent?", KeyCriteria),
+            }, ct);
+            if (keyAnswers["key"] is JsonNode key) answers["key"] = key.DeepClone();
+        }
+
+        return (Translate(answers, offered), (int)sw.ElapsedMilliseconds);
+    }
+
+    private async Task<JsonObject> AskAsync(string state, JsonObject questions, CancellationToken ct)
+    {
+        using var response = await SendAsync(new JsonObject
+        {
+            ["model"] = _model,
+            ["state"] = state,
+            ["questions"] = questions,
+        }, ct);
+        return JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))!["answers"]?.AsObject()
+            ?? throw new InvalidOperationException("Jev returned no answers.");
+    }
+
+    private static string? Chosen(JsonObject answers, string question) =>
+        answers[question]?["choice"]?.GetValue<string>();
+
+    private static JsonObject Choice(string instructions, IReadOnlyDictionary<string, string> criteria)
+    {
+        var map = new JsonObject();
+        foreach (var (option, description) in criteria) map[option] = description;
+        return new JsonObject
+        {
+            ["type"] = "choice",
+            ["instructions"] = instructions,
+            ["criteria"] = map,
+        };
+    }
+
+    /// <summary>
+    /// POST with one retry on the two statuses the API documents as transient
+    /// (429 rate limit, 529 overloaded). Everything else — notably 401 and 422 —
+    /// is a configuration error and fails immediately with its status.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendAsync(JsonObject payload, CancellationToken ct)
+    {
+        HttpResponseMessage? response = null;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            if (attempt > 0) await Task.Delay(TimeSpan.FromMilliseconds(750), ct);
+            response?.Dispose();
+            using var request = new HttpRequestMessage(HttpMethod.Post, _url)
+            {
+                Content = JsonContent.Create(payload),
+            };
+            // Optional: a local open-jev server only demands one when OPENJEV_API_KEY is set.
+            if (!string.IsNullOrWhiteSpace(_key)) request.Headers.Add("Authorization", $"Bearer {_key}");
+            response = await _http.SendAsync(request, ct);
+            if (response.IsSuccessStatusCode) return response;
+            if (response.StatusCode is not (HttpStatusCode.TooManyRequests or (HttpStatusCode)529)) break;
+        }
+
+        var status = (int)response!.StatusCode;
+        var detail = status switch
+        {
+            401 => $"invalid API key (check {KeyEnvVar})",
+            422 => "the request body was rejected: " + await response.Content.ReadAsStringAsync(ct),
+            429 => "rate limited, and the retry was rate limited too",
+            529 => "service overloaded, and the retry was too",
+            _ => await response.Content.ReadAsStringAsync(ct),
+        };
+        response.Dispose();
+        throw new HttpRequestException($"Jev returned {status}: {detail}");
+    }
+
+    /// <summary>
+    /// Turn Jev's answers into the action JSON the loop already parses and traces.
+    /// The confidence rides along: PilotAction ignores unknown fields, and the
+    /// trace records the raw string — so calibration lands in the dataset for free.
+    /// </summary>
+    private static string Translate(JsonObject answers, IReadOnlyList<BrainOption> offered)
+    {
+        var action = Chosen(answers, "action")
+            ?? throw new InvalidOperationException("Jev returned no 'action' answer.");
+        var target = Chosen(answers, "target");
+        var result = new JsonObject { ["action"] = action };
+
+        // Only the verbs that take one carry a target; `none` never leaves this class.
+        // The questions are answered independently in one pass, so "click" paired
+        // with "none" is possible — and would be rejected downstream as an action
+        // with no target. Fall back to the most probable real option rather than
+        // spending a retry: the distribution is already in the reply.
+        if (action is "click")
+        {
+            // `click` is only offered when candidates exist, so the last resort is
+            // always available: the list is RANKED, so its head is the best guess
+            // the loop has — better than an action Validate rejects, which costs a
+            // retry and teaches a System-1 brain nothing.
+            target = target is null or NoTarget
+                ? MostProbableTarget(answers["target"]) ?? offered[0].Id
+                : target;
+            result["target"] = target;
+        }
+        if (action is "press")
+            result["text"] = Chosen(answers, "key")
+                ?? throw new InvalidOperationException(
+                    "Jev chose 'press' but returned no 'key' answer; the reply is malformed.");
+        if (answers["action"]?["confidence"] is JsonNode confidence)
+            result["confidence"] = confidence.DeepClone();
+
+        return result.ToJsonString();
+    }
+
+    /// <summary>The highest-probability option that is an actual candidate, or null
+    /// when the reply carries no usable distribution.</summary>
+    private static string? MostProbableTarget(JsonNode? answer)
+    {
+        if (answer?["probabilities"] is not JsonObject probabilities) return null;
+        string? best = null;
+        var bestP = double.NegativeInfinity;
+        foreach (var (option, value) in probabilities)
+        {
+            if (option == NoTarget || value is null) continue;
+            // A server is free to render 0.8 as a JSON string; GetValue<double>()
+            // throws on that, and a formatting choice must not crash the brain.
+            // Unreadable values are skipped, and the caller falls back to the
+            // ranked head — the same path as no distribution at all.
+            if (!value.AsValue().TryGetValue<double>(out var p)) continue;
+            if (p <= bestP) continue;
+            bestP = p;
+            best = option;
+        }
+        return best;
+    }
+
+    public void Dispose()
+    {
+        if (_ownsHttp) _http.Dispose();
+    }
+}
